@@ -1,0 +1,69 @@
+%% TourDesk AI — as-built backend (ISSUE-0001…0005). Solid = implemented; dashed = planned.
+flowchart TB
+    subgraph EXT[External]
+        MB["Mailbox / provider\n(IMAP · Graph · Gmail)"]:::planned
+        LLM["LLM provider\n(ADR-0028, unconfigured)"]:::planned
+    end
+
+    subgraph SVC[Self-hosted OSS services · compose]
+        PG[("ParadeDB / Postgres\nRLS · pgvector · pg_search")]:::svc
+        NATS{{"NATS + JetStream\nbus + durable queue"}}:::svc
+        TIKA["Apache Tika\nextraction/OCR"]:::svc
+        CLAM["ClamAV\nmalware scan"]:::svc
+    end
+
+    subgraph BE[Go backend · module 'tourdesk']
+        APP["app.Start\nboot + wiring"]:::done
+        CFG["config\nenv, fail-fast"]:::done
+        CLOG["clog\ncorrelation id → slog"]:::done
+        HLT["health\n/healthz fail-closed"]:::done
+        STORE["store\npgx pool · Migrate · WithTenant (RLS)"]:::done
+        BUS["bus\nNATS + JetStream"]:::done
+        RUN["pipeline.Run (stage runner)\ncorrelation · idempotent hand-off\nquarantine · fail-closed"]:::done
+    end
+
+    subgraph PIPE[Case pipeline · stages over NATS/JetStream]
+        direction LR
+        S1["1 Ingest (M1)\nparse·thread·dedup·loop"]:::done
+        S2["2 Screen"]:::planned
+        S3["3 Understand (M3)"]:::planned
+        S4["4 Identify (M2)"]:::planned
+        S5["5 Retrieve (M4/M12)"]:::planned
+        S6["6 Generate (M5)"]:::planned
+        S7["7 Verify (M5)"]:::planned
+        S8["8 Gate (M6)\npure G01–G15"]:::done
+        S9["9 Deliver"]:::planned
+        S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9
+    end
+
+    QUAR[["quarantine\n(poison, replayable)"]]:::infra
+    HUMAN[["human review queue\n(fail-closed)"]]:::infra
+
+    %% wiring
+    APP --> CFG & CLOG & HLT & STORE & BUS
+    APP -. serves .-> HLT
+    HLT -. checks .-> PG & NATS
+    STORE <--> PG
+    BUS <--> NATS
+    RUN --- BUS
+    S1 & S8 -. built on .-> RUN
+    PIPE == JetStream subjects ==> NATS
+
+    %% stage 1 & 8 behaviours
+    MB -. future fetch .-> S1
+    S1 -->|malformed| QUAR
+    S8 -->|auto_send| S9
+    S8 -->|R2 / low-confidence| HUMAN
+    S8 -->|hard-stop| HUMAN
+    RUN -->|handler error| HUMAN
+    RUN -->|undecodable| QUAR
+
+    %% planned dependencies
+    S3 & S6 & S7 -. calls .-> LLM
+    S1 -. attachments .-> CLAM & TIKA
+    S5 -. hybrid search .-> PG
+
+    classDef done fill:#1b5e20,stroke:#a5d6a7,color:#fff;
+    classDef planned fill:#37474f,stroke:#90a4ae,color:#cfd8dc,stroke-dasharray:5 4;
+    classDef svc fill:#0d47a1,stroke:#90caf9,color:#fff;
+    classDef infra fill:#4a148c,stroke:#ce93d8,color:#fff;
