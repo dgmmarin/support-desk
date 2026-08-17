@@ -40,8 +40,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0008](ISSUE-0008-gate-persist-evaluation.md) | Gate stage persists GateEvaluation (durable, idempotent, fail-closed) | done | M6 | M | 0002, 0007 |
 | [0009](ISSUE-0009-dmarc-auth-verification.md) | Inbound DMARC/SPF/DKIM verification | done | M1 | M | 0005 |
 | [0010](ISSUE-0010-db-backed-ingest.md) | DB-backed ingest persistence (Conversation threading + Message) | done | M1 | M | 0005, 0007 |
+| [0011](ISSUE-0011-screen-stage.md) | Screen stage (stage 2) — injection + out-of-scope screening | done | M3 | M | 0004 |
 
-**Next id:** 0011
+**Next id:** 0012
 
 ## Conventions
 
