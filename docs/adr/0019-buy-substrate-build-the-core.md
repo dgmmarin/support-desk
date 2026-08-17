@@ -30,7 +30,12 @@ open-source components behind internal interfaces.
   (consistent with [ADR-0010](0010-model-agnostic-provider-abstraction.md)'s philosophy).
 - Component choices must still satisfy EU-residency and tenant-isolation constraints
   ([ADR-0015](0015-data-layer-tenant-isolation.md), [ADR-0018](0018-eu-residency-no-training-pii-minimisation.md)).
+- **"Adopt", not "buy SaaS".** [ADR-0030](0030-technology-stack.md) refines this: the substrate is
+  **self-hosted OSS** (Postgres, Tika, Tesseract, ClamAV, a Go crawler/queue), which is *more* compliant
+  than third-party SaaS for attachment data (ADR-0018), not merely cheaper. The only external dependency
+  is the LLM provider (ADR-0028).
 
 ## Sign-off needed
 
-Confirm the specific components and that each meets residency/isolation before committing.
+Confirm the specific components and that each meets residency/isolation before committing. The concrete
+stack is decided in [ADR-0030](0030-technology-stack.md).

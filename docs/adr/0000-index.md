@@ -52,6 +52,7 @@ add a new ADR that supersedes the old one (never edit history).
 | [0027](0027-pre-sales-as-first-class-case-type.md) | Pre-sales enquiries are a first-class v1 case type | OD-06 |
 | [0028](0028-model-provider-selection-criteria.md) | Model provider selection by EU-residency + no-training criteria | OD-16 |
 | [0029](0029-beachhead-and-reference-connector.md) | Nordic/Romanian beachhead; Tourpaq-profile reference connector | OD-02 / OD-17 |
+| [0030](0030-technology-stack.md) | Technology stack: Go + Postgres + React, self-hosted OSS substrate | OD-15 / OD-16 |
 
 ## Non-architectural open decisions (tracked, not ADR'd)
 
