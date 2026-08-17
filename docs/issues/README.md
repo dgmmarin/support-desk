@@ -56,8 +56,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0024](ISSUE-0024-understand-stage.md) | Understand stage (stage 3, M3) — deterministic risk R0–R4 | done | M3 | M | 0004, 0023 |
 | [0025](ISSUE-0025-identify-stage.md) | Identify stage (stage 4, M2) — booking resolution + verification level | done | M2 | M | 0004, 0021 |
 | [0026](ISSUE-0026-retrieve-stage.md) | Retrieve stage (stage 5, M4) — SR-M4-01 filter order, isolation, freshness, abstain | done | M4 | M | 0004 |
+| [0027](ISSUE-0027-generate-stage.md) | Generate stage (stage 6, M5) — grounded draft, untrusted-data prompt, commitment guard | done | M5 | M | 0004, 0015, 0023, 0026 |
 
-**Next id:** 0027
+**Next id:** 0028
 
 ## Conventions
 

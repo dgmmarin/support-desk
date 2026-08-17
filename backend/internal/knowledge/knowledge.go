@@ -67,9 +67,11 @@ type Filters struct {
 	IncludeStale bool // auto-send grounding: false; human-assisted: true
 }
 
-// Result is one ranked retrieval hit.
+// Result is one ranked retrieval hit. Text is the chunk body the generator
+// grounds on (the citation resolves to ChunkID + URL).
 type Result struct {
 	ChunkID      string
+	Text         string
 	Tier         Tier
 	Score        float64
 	URL          string
@@ -143,7 +145,7 @@ func (ix *Index) Retrieve(query string, f Filters) RankedContext {
 			continue
 		}
 		results = append(results, Result{
-			ChunkID: it.ID, Tier: it.Tier, Score: s, URL: it.URL,
+			ChunkID: it.ID, Text: it.Text, Tier: it.Tier, Score: s, URL: it.URL,
 			Language: it.Language, LastVerified: it.LastVerified,
 			Stale: stale || it.Status == Stale,
 		})
