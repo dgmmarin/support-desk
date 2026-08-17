@@ -58,8 +58,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0026](ISSUE-0026-retrieve-stage.md) | Retrieve stage (stage 5, M4) — SR-M4-01 filter order, isolation, freshness, abstain | done | M4 | M | 0004 |
 | [0027](ISSUE-0027-generate-stage.md) | Generate stage (stage 6, M5) — grounded draft, untrusted-data prompt, commitment guard | done | M5 | M | 0004, 0015, 0023, 0026 |
 | [0028](ISSUE-0028-verify-stage.md) | Verify stage (stage 7, M5) — independent verifier, per-claim + flags | done | M5 | M | 0004, 0023, 0027 |
+| [0029](ISSUE-0029-composite-confidence.md) | Composite confidence (ADR-0003) — calibrated G05 input | done | M6 | M | 0018, 0028 |
 
-**Next id:** 0029
+**Next id:** 0030
 
 ## Conventions
 
