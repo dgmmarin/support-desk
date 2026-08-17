@@ -36,8 +36,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0004](ISSUE-0004-pipeline-stage-runner.md) | Pipeline stage runner (fail-closed, idempotent, quarantine) | done | — | M | 0001, 0002 |
 | [0005](ISSUE-0005-m1-ingest-core.md) | M1 ingest core (parse, thread, dedup, loop suppression) | done | M1 | M | 0004 |
 | [0006](ISSUE-0006-m1-attachment-scanning.md) | M1 attachment scanning (ClamAV, Tika, PII masking) | done | M1 | M | 0004 |
+| [0007](ISSUE-0007-persistence-immutability.md) | Persistence layer (Message/GateEvaluation/Attachment) + RLS + immutability | done | — | M | 0003 |
 
-**Next id:** 0007
+**Next id:** 0008
 
 ## Conventions
 
