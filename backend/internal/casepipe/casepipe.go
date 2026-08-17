@@ -24,6 +24,7 @@ import (
 	"tourdesk/internal/generate"
 	"tourdesk/internal/identify"
 	"tourdesk/internal/knowledge"
+	"tourdesk/internal/observe"
 	"tourdesk/internal/pipeline"
 	"tourdesk/internal/reservation"
 	"tourdesk/internal/screen"
@@ -64,6 +65,11 @@ type Case struct {
 
 	// Verify.
 	VerifyPass bool `json:"verify_pass"`
+
+	// Gate — the terminal outcome, stamped by the deciding stage so the Observe
+	// stage (10) can record it as telemetry. Empty on an error/early fail-closed
+	// path, which Observe degrades to human_review (never auto_send).
+	Terminal string `json:"terminal,omitempty"`
 }
 
 // Deps are the pluggable cores the wiring drives.
@@ -176,8 +182,10 @@ func (w *wiring) screen(_ context.Context, _ string, c *Case) (string, error) {
 	case screen.Proceed:
 		return w.subj.Understand, nil
 	case screen.File:
+		c.Terminal = observe.RouteFiled
 		return w.subj.Filed, nil
 	default:
+		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
 	}
 }
@@ -192,6 +200,7 @@ func (w *wiring) understand(ctx context.Context, _ string, c *Case) (string, err
 	c.RiskClass = u.RiskClass
 	c.Query = queryOf(u)
 	if u.Injection || len(u.HardStops) > 0 || u.RiskClass >= understand.R3 {
+		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
 	}
 	return w.subj.Identify, nil
@@ -205,6 +214,7 @@ func (w *wiring) identify(ctx context.Context, _ string, c *Case) (string, error
 	c.Level = res.Level
 	c.SenderIsContact = res.SenderIsContact
 	if res.Ambiguous || res.Degraded {
+		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
 	}
 	return w.subj.Retrieve, nil
@@ -215,6 +225,7 @@ func (w *wiring) retrieve(_ context.Context, tenantID string, c *Case) (string, 
 		TenantID: tenantID, Language: c.Language, ValidAt: w.deps.Clock(), IncludeStale: false,
 	})
 	if rc.Abstain {
+		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
 	}
 	c.Chunks = nil
@@ -236,6 +247,7 @@ func (w *wiring) generate(ctx context.Context, _ string, c *Case) (string, error
 	c.GuardPass = d.GuardPass
 	c.DraftOnly = d.DraftOnly
 	if d.Abstained {
+		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
 	}
 	return w.subj.Verify, nil
@@ -252,6 +264,7 @@ func (w *wiring) verify(ctx context.Context, _ string, c *Case) (string, error) 
 	}
 	c.VerifyPass = v.Pass()
 	if !v.Pass() {
+		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
 	}
 	return w.subj.Gate, nil
@@ -262,10 +275,13 @@ func (w *wiring) gate(_ context.Context, _ string, c *Case) (string, error) {
 	res := gate.Evaluate(in)
 	switch res.Route {
 	case gate.RouteSend:
+		c.Terminal = observe.RouteAutoSend
 		return w.subj.Send, nil
 	case gate.RouteSpecialistQueue:
+		c.Terminal = observe.RouteSpecialistQueue
 		return w.subj.Specialist, nil
 	default:
+		c.Terminal = observe.RouteHumanReview
 		return w.subj.Queue, nil
 	}
 }
@@ -310,6 +326,29 @@ func (w *wiring) signals(c *Case) assemblestage.CaseSignals {
 		HardStop:                  len(c.HardStops) > 0,
 		UpstreamAbstain:           false,
 	}
+}
+
+// SignalsOf maps a terminated case's payload to the telemetry Signals the Observe
+// stage (10) records. The spine owns the Case shape, so it supplies the decoder to
+// observe.Serve (which imports nothing upstream). A malformed payload is an error —
+// the runner quarantines it (fail-closed).
+func SignalsOf(payload json.RawMessage) (observe.Signals, error) {
+	var c Case
+	if err := json.Unmarshal(payload, &c); err != nil {
+		return observe.Signals{}, err
+	}
+	return observe.Signals{
+		Route:             c.Terminal,
+		Injection:         c.Injection,
+		HardStop:          len(c.HardStops) > 0,
+		RiskClass:         int(c.RiskClass),
+		VerificationLevel: int(c.Level),
+		ChunkCount:        len(c.Chunks),
+		Retrieved:         len(c.Chunks) > 0,
+		GuardPass:         c.GuardPass,
+		DraftOnly:         c.DraftOnly,
+		VerifyPass:        c.VerifyPass,
+	}, nil
 }
 
 func queryOf(u understand.Understanding) string {

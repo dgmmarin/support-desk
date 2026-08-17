@@ -129,6 +129,16 @@ func handle(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, cf
 		return
 	}
 
+	// Terminal sink: an empty Subject means the handler performed its own durable
+	// side effect and routes nothing downstream (e.g. stage 10 Observe persists
+	// telemetry and stops). Ack and keep flowing — never re-route a case a terminal
+	// stage has already observed.
+	if dec.Subject == "" {
+		log.Info("stage handled (terminal sink)")
+		_ = msg.Ack()
+		return
+	}
+
 	// Wrap the stage output in an Envelope that carries the case identity forward
 	// (correlation id spans every stage — NFR-R-01; tenant/conversation/draft flow
 	// to downstream stages and persistence). Only the payload changes per stage.
