@@ -53,8 +53,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0021](ISSUE-0021-disclosure-matrix.md) | Verification levels + disclosure matrix (ADR-0011 → G08) | done | M2 | M | 0004 |
 | [0022](ISSUE-0022-egress-allowlist.md) | Egress allowlist (SEC-08, ADR-0016) | done | — | M | 0001 |
 | [0023](ISSUE-0023-model-provider-abstraction.md) | Model-provider abstraction (ADR-0010; MOD-01/02/03/05/06) | done | — | M | 0001 |
+| [0024](ISSUE-0024-understand-stage.md) | Understand stage (stage 3, M3) — deterministic risk R0–R4 | done | M3 | M | 0004, 0023 |
 
-**Next id:** 0024
+**Next id:** 0025
 
 ## Conventions
 
