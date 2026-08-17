@@ -35,8 +35,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0003](ISSUE-0003-tenant-isolation-harness.md) | Tenant-isolation test harness + RLS baseline | done | M11 | M | 0001 |
 | [0004](ISSUE-0004-pipeline-stage-runner.md) | Pipeline stage runner (fail-closed, idempotent, quarantine) | done | — | M | 0001, 0002 |
 | [0005](ISSUE-0005-m1-ingest-core.md) | M1 ingest core (parse, thread, dedup, loop suppression) | done | M1 | M | 0004 |
+| [0006](ISSUE-0006-m1-attachment-scanning.md) | M1 attachment scanning (ClamAV, Tika, PII masking) | done | M1 | M | 0004 |
 
-**Next id:** 0006
+**Next id:** 0007
 
 ## Conventions
 
