@@ -46,8 +46,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0014](ISSUE-0014-hardstop-detection.md) | Hard-stop detection in Screen stage (M3 → G04) | done | M3 | M | 0011 |
 | [0015](ISSUE-0015-commitment-guardrail.md) | Commitment guardrail (ADR-0006 → G10) | done | M5 | M | 0004 |
 | [0016](ISSUE-0016-killswitch-circuitbreaker.md) | Kill switch + circuit breaker store (FR-M6-04/05 → G01/G13) | done | M6 | M | 0003 |
+| [0017](ISSUE-0017-autonomy-policy-store.md) | Autonomy policy + trust ladder store (FR-M6-01/03) | done | M6 | M | 0003 |
 
-**Next id:** 0017
+**Next id:** 0018
 
 ## Conventions
 
