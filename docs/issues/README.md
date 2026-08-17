@@ -59,8 +59,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0027](ISSUE-0027-generate-stage.md) | Generate stage (stage 6, M5) — grounded draft, untrusted-data prompt, commitment guard | done | M5 | M | 0004, 0015, 0023, 0026 |
 | [0028](ISSUE-0028-verify-stage.md) | Verify stage (stage 7, M5) — independent verifier, per-claim + flags | done | M5 | M | 0004, 0023, 0027 |
 | [0029](ISSUE-0029-composite-confidence.md) | Composite confidence (ADR-0003) — calibrated G05 input | done | M6 | M | 0018, 0028 |
+| [0030](ISSUE-0030-full-pipeline-wiring.md) | Full pipeline wiring — decision spine end to end + replay safety | done | — | M | 0024–0029 |
 
-**Next id:** 0030
+**Next id:** 0031
 
 ## Conventions
 
