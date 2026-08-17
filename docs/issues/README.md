@@ -42,8 +42,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0010](ISSUE-0010-db-backed-ingest.md) | DB-backed ingest persistence (Conversation threading + Message) | done | M1 | M | 0005, 0007 |
 | [0011](ISSUE-0011-screen-stage.md) | Screen stage (stage 2) — injection + out-of-scope screening | done | M3 | M | 0004 |
 | [0012](ISSUE-0012-draft-sentmessage-persistence.md) | Draft + SentMessage persistence (RLS + immutability) | done | — | M | 0007 |
+| [0013](ISSUE-0013-audit-inv5-reconstruction.md) | AuditRecord + INV-5 reconstruction of the send chain | done | M13 | M | 0008, 0012 |
 
-**Next id:** 0013
+**Next id:** 0014
 
 ## Conventions
 
