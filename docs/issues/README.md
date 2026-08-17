@@ -63,8 +63,41 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0031](ISSUE-0031-observe-stage.md) | Stage 10 (Observe) — immutable per-stage telemetry spanning the correlation id | done | — | M | 0030 |
 | [0032](ISSUE-0032-m10-analytics-read-plane.md) | M10 analytics read/aggregate plane (foundation) + operational & automation aggregation | done | M10 | M | 0031 |
 | [0033](ISSUE-0033-m10-quality-roi.md) | M10 quality analytics + ROI view (rated/unrated split, not-configured currency) | done | M10 | M | 0032 |
+| [0034](ISSUE-0034-m8-edit-delta-feedback-capture.md) | Draft↔sent edit-delta + structured feedback/reason-code capture + classification-override hook | todo | M8 | M | 0012, 0031 |
+| [0035](ISSUE-0035-m8-audit-sampling-customer-signal.md) | Post-send audit sampling + customer-signal feedback | todo | M8 | M | 0034, 0016 |
+| [0036](ISSUE-0036-m8-eval-set-regression-gate.md) | Frozen eval set + regression gate + change-log/rollback + tenant-isolated learning guard | todo | M8 | M | 0023, 0017 |
+| [0037](ISSUE-0037-m11-tenant-config-store.md) | Per-tenant configuration store (brands, mailboxes, languages, SLAs, voice, disclosure text, exclusion lists, retention) | todo | M11 | M | 0003 |
+| [0038](ISSUE-0038-m3-entity-extraction.md) | M3 entity extraction (booking ref, destination, dates, pax, flight no., amounts) | todo | M3 | M | 0024 |
+| [0039](ISSUE-0039-m5-per-claim-citations.md) | M5 per-claim machine-resolvable citations + explicit partial-answer marking | todo | M5 | M | 0027, 0028 |
+| [0040](ISSUE-0040-m5-voice-anti-fabrication.md) | M5 voice profile application + anti-fabrication resolution (links/phones/refs from config only) | todo | M5 | M | 0027, 0037 |
+| [0041](ISSUE-0041-m13-ai-disclosure.md) | AI-disclosure config + machine-readable AI marking + per-message model/version log | todo | M13 | M | 0037, 0012 |
+| [0042](ISSUE-0042-m6-gate-human-exclusion.md) | Gate: no auto-send when a human already replied / recipient on exclusion list or requested human | todo | M6 | M | 0018, 0008, 0037 |
+| [0043](ISSUE-0043-m6-trust-ladder-promotion.md) | Trust-ladder promotion workflow (supervisor action + measured criteria) + auto-send correction/reply-escalation | todo | M6 | M | 0017, 0020, 0010 |
+| [0044](ISSUE-0044-m2-identity-audit-override.md) | Identity-decision audit log + agent manual override → human-verified | todo | M2 | M | 0025, 0013 |
+| [0045](ISSUE-0045-m12-reservation-connector.md) | Reservation Connector Interface (10-method contract) + degraded mode + reference/generic/file-drop connectors + short-TTL cache | todo | M12 | M | 0025 |
+| [0046](ISSUE-0046-m5-booking-personalization.md) | M5 booking-fact personalization + reservation-document attachment gated by verification level | todo | M5 | M | 0045, 0021, 0039 |
+| [0047](ISSUE-0047-m4-knowledge-indexing.md) | Knowledge indexing: chunk/embed/index with full metadata + tenant/brand isolation + no-booking-data-in-index rule | todo | M4 | M | 0026 |
+| [0048](ISSUE-0048-m4-knowledge-sources.md) | Knowledge sources: website crawl (robots/change-detect) + document upload (layout-aware) + structured feeds | todo | M4 | M | 0047 |
+| [0049](ISSUE-0049-m4-canonical-browser-multilingual.md) | Canonical answers authored in-console + knowledge browser (search/usage/retire/review) + multilingual answering | todo | M4 | M | 0047, 0037 |
+| [0050](ISSUE-0050-m8-gap-mining.md) | Knowledge-gap mining (cluster abstain/low-conf/edited, rank by volume×cost) | todo | M8 | M | 0047, 0034 |
+| [0051](ISSUE-0051-m8-promotion-contradiction-tonebank.md) | Canonical-answer promotion + contradiction detection + tone-example bank | todo | M8 | M | 0049, 0034 |
+| [0052](ISSUE-0052-m10-knowledge-dashboard.md) | Knowledge analytics dashboard (coverage, gaps, stale, most/never-cited) | todo | M10 | M | 0047, 0032 |
+| [0053](ISSUE-0053-m1-mail-provider.md) | MailProvider interface + IMAP/SMTP, MS Graph, Gmail providers (swappable, ≤60s to pipeline) | todo | M1 | M | 0005, 0020, 0037 |
+| [0054](ISSUE-0054-m1-multimailbox-bounce.md) | Multi-mailbox / multi-identity routing + bounce hard/soft classification + onboarding deliverability validation | todo | M1 | M | 0053, 0037 |
+| [0055](ISSUE-0055-m7-queue-claim-sla.md) | Case queue scoring service + claim/lock (idle-release) + SLA timers/breach | todo | M7 | M | 0007, 0037 |
+| [0056](ISSUE-0056-m7-search-views-escalation-notes.md) | Case full-text search + saved views/filters + escalation-with-context + internal notes/@mentions | todo | M7 | M | 0055 |
+| [0057](ISSUE-0057-m7-review-booking-actions.md) | Review/evidence read API (three-pane data, inline-citation spans) + booking panel + translation view + autonomy indicator + case actions | todo | M7 | M | 0055, 0045, 0046 |
+| [0058](ISSUE-0058-m9-anomaly-detection.md) | Volume-anomaly detection (overall + per topic/destination) + surge semantic clustering | todo | M9 | M | 0031, 0050 |
+| [0059](ISSUE-0059-m9-event-workspace.md) | Event workspace + official position + cluster answer (personalized bulk) + automation freeze | todo | M9 | M | 0058, 0027, 0017 |
+| [0060](ISSUE-0060-m13-complaint-dsar.md) | Complaint workflow (register/deadline/owner/closure, never auto-answered) + DSAR tooling (export/erase) | todo | M13 | M | 0013, 0044 |
+| [0061](ISSUE-0061-m13-retention.md) | Retention policy per tenant/data-class + automated deletion | todo | M13 | M | 0007, 0037 |
+| [0062](ISSUE-0062-m10-compliance-reports.md) | Compliance reports view (complaint register, disclosure log, data-request log, autonomy-policy history) | todo | M10 | M | 0060, 0041, 0017, 0033 |
+| [0063](ISSUE-0063-m11-onboarding-sandbox.md) | Onboarding wizard orchestration + sandbox/test replay mode | todo | M11 | M | 0037, 0053 |
+| [0064](ISSUE-0064-m11-rbac-sso.md) | RBAC + SSO/SAML/OIDC | todo | M11 | M | 0037 |
+| [0065](ISSUE-0065-m11-usage-metering-health.md) | Usage metering (conversations/messages/auto-sends/tokens/storage) + tenant health/status API | todo | M11 | M | 0031, 0053 |
+| [0066](ISSUE-0066-m11-vendor-support-access.md) | Vendor support access: tenant-granted, time-boxed, purpose-logged elevation | todo | M11 | M | 0037, 0013 |
 
-**Next id:** 0034
+**Next id:** 0067
 
 ## Conventions
 
