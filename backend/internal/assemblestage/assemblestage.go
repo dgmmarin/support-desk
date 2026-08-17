@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"tourdesk/internal/eval"
 	"tourdesk/internal/gate"
 	"tourdesk/internal/pipeline"
 	"tourdesk/internal/store"
@@ -97,6 +98,15 @@ func BuildInput(s CaseSignals, pol store.AutonomyPolicy, kill, breaker bool) gat
 	}
 }
 
+// ApplyEvalSetCap caps the assembled input's autonomy level at L1 when the intent
+// has no held-out frozen eval set (FR-M8-05 guardrail, ties CAL-03). It reuses the
+// pure eval.CapLevelForEvalSet and flows through the gate's existing level check
+// (G01) — no new gate condition. Called by Serve after reading eval-set presence.
+func ApplyEvalSetCap(in gate.Input, evalSetPresent bool) gate.Input {
+	in.Level = gate.Level(eval.CapLevelForEvalSet(evalSetPresent, int(in.Level)))
+	return in
+}
+
 // Serve runs the assemble stage: it reads tenant autonomy config, builds gate.Input
 // and publishes it to gateSubject (the gate stage's input). db must be non-nil.
 func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, db *store.DB, inStream, inSubject, gateSubject, reviewSubject string) (stop func(), err error) {
@@ -131,7 +141,12 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, db 
 			if e != nil {
 				return e
 			}
-			in = BuildInput(s, pol, kill, breaker)
+			// No held-out eval set for the intent ⇒ cap at L1 (FR-M8-05, ties CAL-03).
+			evalSet, e := store.EvalSetExistsForIntent(ctx, tx, s.Intent)
+			if e != nil {
+				return e
+			}
+			in = ApplyEvalSetCap(BuildInput(s, pol, kill, breaker), evalSet)
 			return nil
 		}); err != nil {
 			return pipeline.Decision{}, err // fail closed → review

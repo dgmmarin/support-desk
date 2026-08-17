@@ -90,11 +90,18 @@ func TestE2EAssembleToGate(t *testing.T) {
 		}
 	})
 
-	// Permissive policy for tenant A, intent faq.
+	// Permissive policy + a held-out eval set for tenant A, intent faq. Auto-send
+	// above L1 requires a frozen eval set (FR-M8-05 guardrail, ISSUE-0036).
 	if err := store.WithTenant(ctx, app.Pool, testsupport.TenantA, func(tx pgx.Tx) error {
-		return store.SetAutonomyPolicy(ctx, tx, "default", "faq", store.AutonomyPolicy{
+		if e := store.SetAutonomyPolicy(ctx, tx, "default", "faq", store.AutonomyPolicy{
 			Level: 2, Allowlisted: true, Threshold: 0.98, MaxRisk: 0, Calibrated: true, AuditCount: 500,
+		}); e != nil {
+			return e
+		}
+		_, e := store.InsertEvaluationCase(ctx, tx, store.EvaluationCase{
+			SetVersion: 1, CaseRef: "c1", Intent: "faq", Input: "opening hours?", Expected: "We open at 9am.",
 		})
+		return e
 	}); err != nil {
 		t.Fatalf("set policy: %v", err)
 	}

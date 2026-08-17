@@ -107,7 +107,14 @@ func TestE2EConfidenceGatesSend(t *testing.T) {
 		if e := store.SetKillSwitch(ctx, tx, "", false); e != nil {
 			return e
 		}
-		return store.SetKillSwitch(ctx, tx, intent, false)
+		if e := store.SetKillSwitch(ctx, tx, intent, false); e != nil {
+			return e
+		}
+		// Auto-send above L1 requires a held-out eval set (FR-M8-05, ISSUE-0036).
+		_, e := store.InsertEvaluationCase(ctx, tx, store.EvaluationCase{
+			SetVersion: 1, CaseRef: "c1", Intent: intent, Input: "q?", Expected: "a.",
+		})
+		return e
 	}); err != nil {
 		t.Fatalf("set policy: %v", err)
 	}
