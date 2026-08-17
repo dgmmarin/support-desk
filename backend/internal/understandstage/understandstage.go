@@ -30,6 +30,7 @@ type UnderstoodEvent struct {
 	Language      string               `json:"language"`
 	RiskClass     understand.RiskClass `json:"risk_class"`
 	Units         []understand.Unit    `json:"units"`
+	Entities      understand.Entities  `json:"entities"`
 	HardStops     []string             `json:"hard_stops,omitempty"`
 	Injection     bool                 `json:"injection"`
 	Sentiment     string               `json:"sentiment,omitempty"`
@@ -61,6 +62,7 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, cl 
 			Language:      u.Language,
 			RiskClass:     u.RiskClass,
 			Units:         u.Units,
+			Entities:      u.Entities,
 			HardStops:     u.HardStops,
 			Injection:     u.Injection,
 			Sentiment:     u.Sentiment,
