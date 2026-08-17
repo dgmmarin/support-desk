@@ -1,0 +1,38 @@
+flowchart TB
+  subgraph ext["External"]
+    CUST["Customer"]
+    MB["Support mailbox<br/>IMAP · MS Graph · Gmail"]
+    RES["Reservation system<br/>operator back-end"]
+    SRC["Operator content<br/>website · docs · feeds"]
+  end
+
+  subgraph plat["TourDesk AI platform — multi-tenant, EU-resident"]
+    direction TB
+    MAIL["Mail provider adapter<br/>M1: parse · thread · loop-guard"]
+    PIPE["Case pipeline<br/>10 stages, fail-closed"]
+    IDV["Identity and verification<br/>M2: levels · disclosure matrix"]
+    KNOW["Knowledge platform<br/>M4: hybrid retrieval · authority · freshness"]
+    CONN["Reservation connector<br/>M12: read-only interface"]
+    GATE{"Autonomy gate<br/>M6: deterministic · 15 conditions"}
+    CONSOLE["Agent console<br/>M7: queue · review · audit"]
+    LEARN["Learning loop<br/>M8: edits · eval set · regression gate"]
+    ANALYTICS["Analytics and compliance<br/>M10/M13: ROI · disclosure · DSAR"]
+    STORE[("Per-tenant stores<br/>cases · knowledge index · audit")]
+  end
+
+  CUST -->|email| MB --> MAIL --> PIPE
+  PIPE <--> IDV
+  PIPE <--> KNOW
+  PIPE <--> CONN
+  PIPE --> GATE
+  GATE -->|auto_send| MAIL
+  GATE -->|human_review / abstain| CONSOLE
+  CONSOLE -->|approved send| MAIL
+  MAIL -->|reply| CUST
+  CONN <-->|read-only| RES
+  SRC --> KNOW
+  CONSOLE --> LEARN --> KNOW
+  PIPE --> STORE
+  CONSOLE --> STORE
+  STORE --> ANALYTICS
+  PIPE -. telemetry .-> ANALYTICS

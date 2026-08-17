@@ -1,0 +1,31 @@
+flowchart TB
+  D["Draft + verifier verdict + context"] --> G1
+
+  G1{"G01-G03<br/>level · allowlist · risk ≤ max"}
+  G2{"G04<br/>no hard-stop signal"}
+  G3{"G05-G07<br/>confidence · groundedness · freshness"}
+  G4{"G08-G09<br/>verification+DMARC · live read"}
+  G5{"G10<br/>commitment guardrail"}
+  G6{"G11<br/>language approved"}
+  G7{"G12<br/>no human takeover · not excluded"}
+  G8{"G13-G15<br/>rate/breaker · safety/tone · time window"}
+
+  G1 -->|pass| G2 -->|pass| G3 -->|pass| G4 -->|pass| G5
+  G5 -->|pass| G6 -->|pass| G7 -->|pass| G8
+  G8 -->|all pass| AUTO["auto_send"]
+
+  G1 -->|fail| QUEUE["Normal queue"]
+  G7 -->|fail| QUEUE
+  G2 -->|fail| SPEC["Specialist / senior queue"]
+  G3 -->|"fail — reason shown"| REVIEW["Human review + failure reason"]
+  G5 -->|"fail — reason shown"| REVIEW
+  G4 -->|fail| REVIEW
+  G6 -->|fail| REVIEW
+  G8 -->|fail| HOLD["Review / hold"]
+
+  KILL["Kill switch / circuit breaker"] -. overrides .-> G1
+
+  classDef ok fill:#e6f4ea,stroke:#34a853,color:#111;
+  classDef stop fill:#fce8e6,stroke:#ea4335,color:#111;
+  class AUTO ok;
+  class QUEUE,SPEC,REVIEW,HOLD,KILL stop;

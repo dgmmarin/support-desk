@@ -1,0 +1,48 @@
+erDiagram
+  TENANT ||--o{ BRAND : has
+  TENANT ||--o{ CUSTOMER : has
+  TENANT ||--o{ AUTONOMYPOLICY : configures
+  TENANT ||--o{ KNOWLEDGESOURCE : owns
+  TENANT ||--o{ EVENT : runs
+  TENANT ||--o{ EVALUATIONCASE : owns
+  TENANT ||--o{ AUDITRECORD : records
+  BRAND ||--o{ MAILBOX : has
+  BRAND ||--o{ CONVERSATION : scopes
+  CUSTOMER ||--o{ CONVERSATION : opens
+  CONVERSATION ||--o{ MESSAGE : contains
+  CONVERSATION }o--o| BOOKING : about
+  CONVERSATION ||--o{ DRAFT : produces
+  MESSAGE ||--o{ ATTACHMENT : has
+  MESSAGE ||--|| UNDERSTANDING : yields
+  DRAFT ||--o{ CITATION : cites
+  DRAFT ||--|| GATEEVALUATION : evaluated_by
+  DRAFT ||--o{ REVIEWACTION : edited_by
+  DRAFT ||--o| SENTMESSAGE : sent_as
+  KNOWLEDGESOURCE ||--o{ KNOWLEDGEITEM : yields
+  CITATION }o--o| KNOWLEDGEITEM : resolves_to
+  EVENT }o--o{ CONVERSATION : clusters
+
+  TENANT {
+    uuid id
+    string region
+    string autonomy_level
+    json retention_policy
+  }
+  CONVERSATION {
+    uuid id
+    uuid tenant_id
+    string status
+    string risk_class
+    string autonomy_outcome
+  }
+  GATEEVALUATION {
+    uuid id
+    json condition_results
+    string outcome
+    datetime evaluated_at
+  }
+  BOOKING {
+    string external_id
+    string status
+    bool is_cached_projection
+  }

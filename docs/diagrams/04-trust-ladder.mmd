@@ -1,0 +1,23 @@
+stateDiagram-v2
+  [*] --> L0
+  L0: L0 Shadow — draft only, never send
+  L1: L1 Assisted — every send human-approved
+  L2: L2 Narrow auto — allowlisted R0, 100% audit
+  L3: L3 Broad auto — expanded intents, sampled audit
+  L4: L4 Autonomous — with exceptions
+
+  L0 --> L1: supervisor promote
+  L1 --> L2: promote, criteria met
+  L2 --> L3: promote, R1 + integration
+  L3 --> L4: promote
+
+  L4 --> L3: circuit breaker
+  L3 --> L2: circuit breaker
+  L2 --> L1: circuit breaker
+  L1 --> L0: manual off / kill switch
+
+  note right of L2
+    Promotion: human-gated on measured criteria
+    Demotion: automatic, drops one level, any level
+    Per tenant, per brand, per intent
+  end note

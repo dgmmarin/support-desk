@@ -1,0 +1,28 @@
+flowchart TB
+  IN["Inbound email"] --> S1
+  S1["1 Ingest<br/>parse · thread · dedupe · loop-check · scan"]
+  S2["2 Screen<br/>spam · auto-reply · injection · DMARC"]
+  S3["3 Understand<br/>language · intent · entities · risk · hard-stops"]
+  S4["4 Identify<br/>booking resolution · verification level"]
+  S5["5 Retrieve<br/>hybrid search + live reservation reads"]
+  S6["6 Generate<br/>grounded draft · claim-level citations"]
+  S7["7 Verify<br/>groundedness · commitments · PII · injection"]
+  S8{"8 Gate<br/>deterministic · 15 conditions"}
+  S9["9 Deliver<br/>disclosure · threading · hold delay"]
+  S10["10 Observe<br/>log · audit sample · metrics · learning"]
+
+  S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8
+  S8 -->|auto_send| S9 --> S10
+  S8 -->|human_review| Q["Agent queue<br/>M7"]
+  S8 -->|abstain_and_escalate| Q
+  Q --> S10
+
+  S1 -. parse fail .-> QUAR["Quarantine + alert"]
+  S2 -. spam / injection .-> Q
+  S3 -. force human .-> Q
+  S7 -. unsupported / contradiction .-> Q
+
+  classDef model fill:#e8f0fe,stroke:#4285f4,color:#111;
+  classDef code fill:#e6f4ea,stroke:#34a853,color:#111;
+  class S3,S6,S7 model;
+  class S2,S4,S8 code;
