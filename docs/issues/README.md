@@ -55,8 +55,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0023](ISSUE-0023-model-provider-abstraction.md) | Model-provider abstraction (ADR-0010; MOD-01/02/03/05/06) | done | — | M | 0001 |
 | [0024](ISSUE-0024-understand-stage.md) | Understand stage (stage 3, M3) — deterministic risk R0–R4 | done | M3 | M | 0004, 0023 |
 | [0025](ISSUE-0025-identify-stage.md) | Identify stage (stage 4, M2) — booking resolution + verification level | done | M2 | M | 0004, 0021 |
+| [0026](ISSUE-0026-retrieve-stage.md) | Retrieve stage (stage 5, M4) — SR-M4-01 filter order, isolation, freshness, abstain | done | M4 | M | 0004 |
 
-**Next id:** 0026
+**Next id:** 0027
 
 ## Conventions
 
