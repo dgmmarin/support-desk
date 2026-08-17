@@ -45,8 +45,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0013](ISSUE-0013-audit-inv5-reconstruction.md) | AuditRecord + INV-5 reconstruction of the send chain | done | M13 | M | 0008, 0012 |
 | [0014](ISSUE-0014-hardstop-detection.md) | Hard-stop detection in Screen stage (M3 → G04) | done | M3 | M | 0011 |
 | [0015](ISSUE-0015-commitment-guardrail.md) | Commitment guardrail (ADR-0006 → G10) | done | M5 | M | 0004 |
+| [0016](ISSUE-0016-killswitch-circuitbreaker.md) | Kill switch + circuit breaker store (FR-M6-04/05 → G01/G13) | done | M6 | M | 0003 |
 
-**Next id:** 0016
+**Next id:** 0017
 
 ## Conventions
 
