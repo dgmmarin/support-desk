@@ -56,7 +56,8 @@ func TestE2EGateRoutesCaseToCorrectQueue(t *testing.T) {
 	defer js.DeleteStream(ctx, inStream)
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	stop, err := gatestage.Serve(ctx, js, logger, inStream, inSubject, outBase)
+	// nil store: this test exercises pure routing, not persistence (see gate_persist E2E).
+	stop, err := gatestage.Serve(ctx, js, logger, nil, inStream, inSubject, outBase)
 	if err != nil {
 		t.Fatalf("serve gate stage: %v", err)
 	}

@@ -28,6 +28,7 @@ import (
 // is the idempotency key (§3).
 type Envelope struct {
 	CorrelationID  string          `json:"correlation_id"`
+	TenantID       string          `json:"tenant_id,omitempty"` // the case's tenant (data-layer scope)
 	ConversationID string          `json:"conversation_id"`
 	DraftID        string          `json:"draft_id,omitempty"`
 	Payload        json.RawMessage `json:"payload"`

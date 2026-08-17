@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -79,15 +80,26 @@ type GateEvaluation struct {
 	Conditions     json.RawMessage // the full per-condition vector (G01–G15)
 }
 
-// InsertGateEvaluation appends a gate evaluation for the active tenant.
+// InsertGateEvaluation appends a gate evaluation for the active tenant. It is
+// idempotent on (tenant_id, conversation_id, draft_id): a redelivered case writes
+// exactly one row and returns the existing id (NFR-S-04). The row stays immutable
+// (INV-2) — the conflict path does nothing, it never updates.
 func InsertGateEvaluation(ctx context.Context, tx pgx.Tx, g GateEvaluation) (string, error) {
 	var id string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO gate_evaluations (tenant_id, conversation_id, draft_id, outcome, route, conditions)
 		VALUES (cur_tenant(), $1, $2, $3, $4, $5::jsonb)
+		ON CONFLICT (tenant_id, conversation_id, draft_id) DO NOTHING
 		RETURNING id`,
 		g.ConversationID, g.DraftID, g.Outcome, g.Route, string(g.Conditions),
 	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Already recorded for this case — return the existing id.
+		err = tx.QueryRow(ctx,
+			`SELECT id FROM gate_evaluations WHERE tenant_id = cur_tenant() AND conversation_id = $1 AND draft_id = $2`,
+			g.ConversationID, g.DraftID,
+		).Scan(&id)
+	}
 	if err != nil {
 		return "", fmt.Errorf("store: insert gate evaluation: %w", err)
 	}

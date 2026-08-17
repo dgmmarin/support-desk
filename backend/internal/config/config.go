@@ -10,11 +10,12 @@ import (
 
 // Config is the backend's runtime configuration. All values originate from env.
 type Config struct {
-	DatabaseURL string // Postgres DSN (ParadeDB)
-	NATSURL     string // NATS/JetStream URL
-	TikaURL     string // Apache Tika base URL
-	ClamAVAddr  string // ClamAV daemon host:port
-	HTTPAddr    string // listen address for the health/API server
+	DatabaseURL    string // Postgres DSN — superuser/migration role (ParadeDB)
+	AppDatabaseURL string // Postgres DSN — non-superuser app role (RLS-bound); optional
+	NATSURL        string // NATS/JetStream URL
+	TikaURL        string // Apache Tika base URL
+	ClamAVAddr     string // ClamAV daemon host:port
+	HTTPAddr       string // listen address for the health/API server
 }
 
 // Load reads configuration from the environment and fails fast when a required
@@ -22,11 +23,15 @@ type Config struct {
 // keeps a half-configured process from limping along (NFR-R-01: observable boot).
 func Load() (Config, error) {
 	c := Config{
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		NATSURL:     os.Getenv("NATS_URL"),
-		TikaURL:     os.Getenv("TIKA_URL"),
-		ClamAVAddr:  os.Getenv("CLAMAV_ADDR"),
-		HTTPAddr:    getenv("HTTP_ADDR", ":8080"),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		AppDatabaseURL: os.Getenv("APP_DATABASE_URL"), // optional; falls back to DatabaseURL below
+		NATSURL:        os.Getenv("NATS_URL"),
+		TikaURL:        os.Getenv("TIKA_URL"),
+		ClamAVAddr:     os.Getenv("CLAMAV_ADDR"),
+		HTTPAddr:       getenv("HTTP_ADDR", ":8080"),
+	}
+	if c.AppDatabaseURL == "" {
+		c.AppDatabaseURL = c.DatabaseURL
 	}
 
 	var missing []string
