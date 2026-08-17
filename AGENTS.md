@@ -31,9 +31,12 @@ deliberate, surfaced change.
    issue. See [docs/issues/README.md](docs/issues/README.md).
 2. **Read the governing spec + its linked ADRs before writing any code.** Guessing the contract is the
    main failure mode. Grep the PRD for the relevant `FR-` ids.
-3. **Test-first (red → green → refactor).** Write a failing test named for its requirement id
-   (e.g. `test_FR_M6_02_...`) — including the **fail-closed path** — before implementation code. Trivial
-   one-liners excepted; anything with logic gets a test.
+3. **TDD is mandatory — strict red → green → refactor (non-negotiable).** Everything is developed
+   test-first: write the failing test named for its requirement id (e.g. `test_FR_M6_02_...`) — including
+   the **fail-closed path** — and **run it to observe it fail (red)** *before* writing any implementation
+   code. Then write the minimum code to pass (green), then refactor. No production code is written ahead of
+   a test that pins it and has been seen to fail. The only carve-out is a truly trivial one-liner with no
+   logic; anything with behaviour gets a red-first test.
 4. **Every issue has a mandatory E2E test.** One end-to-end test that drives the slice through its real
    boundary — the running services (compose) and real NATS/Postgres/HTTP transport, no mocks at the seam.
    The issue is not `done` until that E2E test is green.
