@@ -54,8 +54,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0022](ISSUE-0022-egress-allowlist.md) | Egress allowlist (SEC-08, ADR-0016) | done | — | M | 0001 |
 | [0023](ISSUE-0023-model-provider-abstraction.md) | Model-provider abstraction (ADR-0010; MOD-01/02/03/05/06) | done | — | M | 0001 |
 | [0024](ISSUE-0024-understand-stage.md) | Understand stage (stage 3, M3) — deterministic risk R0–R4 | done | M3 | M | 0004, 0023 |
+| [0025](ISSUE-0025-identify-stage.md) | Identify stage (stage 4, M2) — booking resolution + verification level | done | M2 | M | 0004, 0021 |
 
-**Next id:** 0025
+**Next id:** 0026
 
 ## Conventions
 
