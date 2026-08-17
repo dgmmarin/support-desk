@@ -1,0 +1,21 @@
+# Local environment / secrets
+.env
+.env.local
+
+# mise local overrides + installs
+mise.local.toml
+.mise.local.toml
+.mise/
+
+# Node / console
+node_modules/
+console/dist/
+
+# Go / backend
+backend/bin/
+*.test
+*.out
+
+# Editor / OS
+.DS_Store
+*.swp

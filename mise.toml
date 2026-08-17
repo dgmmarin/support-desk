@@ -1,0 +1,110 @@
+# TourDesk AI — dev environment (mise)
+# Wraps toolchain versions + the OSS backing services (docker compose).
+# Quickstart:  mise trust && mise run setup && mise run up
+# See docs/development.md and docs/adr/0030-technology-stack.md
+
+[tools]
+go = "1.26"      # backend: pipeline, gate, connectors (ADR-0030)
+node = "24"      # console: React + TypeScript (M7)
+
+[env]
+# Non-secret local-dev defaults. Override in .env (git-ignored) for anything real.
+POSTGRES_USER = "tourdesk"
+POSTGRES_PASSWORD = "tourdesk"
+POSTGRES_DB = "tourdesk"
+POSTGRES_PORT = "5432"
+NATS_PORT = "4222"
+NATS_MONITOR_PORT = "8222"
+TIKA_PORT = "9998"
+CLAMAV_PORT = "3310"
+# Connection strings the services/apps read:
+DATABASE_URL = "postgres://tourdesk:tourdesk@localhost:5432/tourdesk?sslmode=disable"
+NATS_URL = "nats://localhost:4222"
+TIKA_URL = "http://localhost:9998"
+CLAMAV_ADDR = "localhost:3310"
+
+# ── Services (OSS substrate, ADR-0030) ─────────────────────────────────────────
+[tasks.setup]
+description = "Install toolchain + create .env + start services"
+run = [
+  "mise install",
+  "test -f .env || cp .env.example .env",
+  "docker compose up -d",
+]
+
+[tasks.up]
+description = "Start all backing services (postgres, nats, tika, clamav)"
+run = "docker compose up -d"
+
+[tasks.down]
+description = "Stop and remove service containers (keeps data volumes)"
+run = "docker compose down"
+
+[tasks.stop]
+description = "Stop services without removing them"
+run = "docker compose stop"
+
+[tasks.restart]
+description = "Restart all services"
+run = "docker compose restart"
+
+[tasks.ps]
+description = "Show service status"
+run = "docker compose ps"
+
+[tasks.logs]
+description = "Tail logs for all services (or: mise run logs -- postgres)"
+run = "docker compose logs -f"
+
+[tasks.clean]
+description = "Stop services AND delete data volumes (destructive)"
+run = "docker compose down -v"
+
+# ── Service shortcuts ──────────────────────────────────────────────────────────
+[tasks.db]
+description = "Open a psql shell on the dev database"
+run = "docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB"
+
+[tasks."nats:info"]
+description = "Show NATS/JetStream server info (monitoring endpoint)"
+run = "curl -s http://localhost:$NATS_MONITOR_PORT/varz | head -40 || echo 'NATS not up — mise run up'"
+
+[tasks."clam:ping"]
+description = "Ping the ClamAV daemon"
+run = "docker compose exec clamav clamdscan --ping 3 && echo 'clamd OK' || echo 'clamd still loading signature DB (first start is slow)'"
+
+[tasks.doctor]
+description = "Check that tools + services are healthy"
+run = '''
+echo "go:   $(go version 2>/dev/null || echo MISSING)"
+echo "node: $(node --version 2>/dev/null || echo MISSING)"
+echo "--- services ---"
+docker compose ps
+'''
+
+# ── App processes (scaffolded later — ADR-0030; guarded so tasks don't error) ──
+[tasks.backend]
+description = "Run the Go backend (expects ./backend once scaffolded)"
+run = '''
+if [ -d backend ]; then
+  cd backend && go run ./cmd/tourdesk
+else
+  echo "backend/ not scaffolded yet. Stack decided in docs/adr/0030-technology-stack.md."
+  echo "Use the spec-driven-dev agent to build against docs/specs/."
+fi
+'''
+
+[tasks.frontend]
+description = "Run the React/TS console (expects ./console once scaffolded)"
+run = '''
+if [ -d console ]; then
+  cd console && npm run dev
+else
+  echo "console/ not scaffolded yet. See docs/specs/M7-agent-console.md."
+fi
+'''
+
+[tasks.dev]
+description = "Start services, then backend + console (once scaffolded)"
+depends = ["up"]
+run = "mise run backend & mise run frontend & wait"

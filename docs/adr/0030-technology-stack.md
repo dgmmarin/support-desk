@@ -27,7 +27,7 @@ not in-process ML.
 |---|---|
 | Backend: pipeline, **gate**, connectors, APIs | **Go** — typed deterministic core, cheap high-concurrency workers, strong stdlib (`net/mail`, `net/http`) |
 | Database + retrieval | **Postgres** — row-level security for isolation (ADR-0015); `pgvector` (semantic) + native FTS, with the OSS **ParadeDB `pg_search`** extension for true BM25 (ADR-0012) |
-| Work queue | **River** (Postgres-backed, Go) or self-hosted NATS — at-least-once + idempotent (NFR-S-04) |
+| Inter-service/-process bus **and** work queue | **NATS** — core pub/sub + request/reply between services and processes; **JetStream** durable work-queue streams give at-least-once + idempotent pipeline hand-off (NFR-S-04) |
 | LLM access | Provider **HTTP** behind a Go interface (ADR-0010); provider constrained by ADR-0028 |
 | Embeddings | EU-resident provider API, or self-hosted multilingual model (multilingual-e5 class) for full residency |
 | Document extraction / OCR | **Apache Tika** + **Tesseract**, self-hosted OSS containers (FR-M4-02, FR-M1-09) |
@@ -52,6 +52,10 @@ Everything except the **LLM provider** runs inside our own EU infrastructure.
 ## Consequences
 
 - One backend language around the code that must not be wrong (the gate) — the lazy-senior win.
+- **NATS is the backbone**: every pipeline stage and every service communicates over NATS (subjects for
+  events, request/reply for synchronous calls, JetStream streams for durable stage hand-off). This makes
+  the 10 stages independently scalable (NFR-S-03) and lets poison messages be redelivered/quarantined
+  (NFR-R-02) without a separate broker. One dependency serves both messaging and queueing.
 - No SaaS sub-processors beyond the LLM provider; simplifies the DPA, sub-processor list (FR-M13-09) and
   DPIA (LEG-04).
 - **Layout-aware table extraction** (FR-M4-02) is the main technical risk to spike early, because

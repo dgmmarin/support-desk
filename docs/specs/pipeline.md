@@ -32,8 +32,9 @@ auditability guarantee we make in every security review (§9.1 design note).
 
 ## 3. Contract between stages
 
-- Stages communicate via a durable work queue; processing is **at-least-once with idempotent sends**
-  (NFR-S-04) — a duplicate customer reply is a P1 defect. Idempotency key = `(conversation_id, draft_id)`.
+- Stages communicate over **NATS** (ADR-0030): subjects carry stage events, and **JetStream** durable
+  work-queue streams carry the hand-off between stages. Processing is **at-least-once with idempotent
+  sends** (NFR-S-04) — a duplicate customer reply is a P1 defect. Idempotency key = `(conversation_id, draft_id)`.
 - One **correlation id** spans all stages (NFR-R-01); every log line and audit record carries it.
 - A stage may **fail closed** by emitting its documented fallback outcome and routing the case to a
   human — it must never crash the case or the queue. Poison messages are quarantined and replayable
