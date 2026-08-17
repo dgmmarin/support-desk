@@ -19,6 +19,8 @@ TIKA_PORT = "9998"
 CLAMAV_PORT = "3310"
 # Connection strings the services/apps read:
 DATABASE_URL = "postgres://tourdesk:tourdesk@localhost:5433/tourdesk?sslmode=disable"
+# Non-superuser app role (RLS-bound, ADR-0015); created by migration 0001.
+APP_DATABASE_URL = "postgres://tourdesk_app:tourdesk_app@localhost:5433/tourdesk?sslmode=disable"
 NATS_URL = "nats://localhost:4222"
 TIKA_URL = "http://localhost:9998"
 CLAMAV_ADDR = "localhost:3310"
