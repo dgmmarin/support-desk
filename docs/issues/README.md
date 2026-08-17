@@ -51,8 +51,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0019](ISSUE-0019-rate-limiting.md) | Rate limiting + per-recipient caps (FR-M6-06 → G13) | done | M6 | M | 0003 |
 | [0020](ISSUE-0020-deliver-stage.md) | Deliver stage (stage 9) + replay send-impossible (NFR-R-04) | done | M1 | M | 0012, 0019 |
 | [0021](ISSUE-0021-disclosure-matrix.md) | Verification levels + disclosure matrix (ADR-0011 → G08) | done | M2 | M | 0004 |
+| [0022](ISSUE-0022-egress-allowlist.md) | Egress allowlist (SEC-08, ADR-0016) | done | — | M | 0001 |
 
-**Next id:** 0022
+**Next id:** 0023
 
 ## Conventions
 
