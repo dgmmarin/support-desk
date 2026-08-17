@@ -102,6 +102,138 @@ func TestFreshnessLagWhenRows(t *testing.T) {
 	}
 }
 
+// ── Quality (FR-M10-03) ───────────────────────────────────────────────────────────
+
+// TestFRM1003AuditAccuracyOnlyOverRatedNeverBlendsUnrated is the load-bearing guardrail
+// (spec §5): audit accuracy is computed ONLY over sampled+rated cases (M8), never blended
+// with unrated volume. 10 auto-sent, 4 rated, 3 of them correct → accuracy = 3÷4 = 0.75,
+// NOT 3÷10 = 0.30. Unrated volume (6) is shown separately.
+func TestFRM1003AuditAccuracyOnlyOverRatedNeverBlendsUnrated(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	c := QualityCounts{AutoSent: 10, Rated: 4, RatedCorrect: 3, CircuitEvents: 0}
+
+	r := computeQuality(c, now.Add(-time.Minute), true, now)
+
+	if !r.AuditAccuracy.Present || r.AuditAccuracy.Value != 0.75 {
+		t.Fatalf("audit accuracy = %v (present=%v), want 0.75 = 3÷4 rated (never 3÷10 blended)", r.AuditAccuracy.Value, r.AuditAccuracy.Present)
+	}
+	if !r.RatedVolume.Present || r.RatedVolume.Value != 4 {
+		t.Fatalf("rated volume = %v, want 4", r.RatedVolume.Value)
+	}
+	if !r.UnratedVolume.Present || r.UnratedVolume.Value != 6 {
+		t.Fatalf("unrated volume = %v, want 6 (shown separately, FR-M10-03)", r.UnratedVolume.Value)
+	}
+	if r.Formula == "" || !containsAll(r.Formula, "rated", "unrated") {
+		t.Fatalf("formula must surface the rated/unrated separation (SR-M10-01), got %q", r.Formula)
+	}
+}
+
+// TestFRM1003AuditAccuracyGapWhenNoRatedCases: with auto-sent volume but zero rated cases,
+// accuracy is undefined and MUST be a gap, never a false 0 (which reads as "0% accurate").
+// The unrated volume equals all auto-sent and is shown separately.
+func TestFRM1003AuditAccuracyGapWhenNoRatedCases(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	c := QualityCounts{AutoSent: 10, Rated: 0, RatedCorrect: 0, CircuitEvents: 0}
+
+	r := computeQuality(c, now.Add(-time.Minute), true, now)
+
+	if r.AuditAccuracy.Present {
+		t.Fatalf("audit accuracy must be a gap when 0 rated, got present value %v", r.AuditAccuracy.Value)
+	}
+	if r.AuditAccuracy.Gap == "" || r.AuditAccuracy.Value != 0 {
+		t.Fatalf("audit accuracy gap must carry a reason and stay zero-value, got value=%v gap=%q", r.AuditAccuracy.Value, r.AuditAccuracy.Gap)
+	}
+	if !r.UnratedVolume.Present || r.UnratedVolume.Value != 10 {
+		t.Fatalf("unrated volume = %v, want 10 (all auto-sent, shown separately)", r.UnratedVolume.Value)
+	}
+}
+
+// TestFRM1003CircuitBreakerEventsAreRealNotGapped: circuit-breaker events come from the
+// ISSUE-0016 store, so they are a real figure, never a gap.
+func TestFRM1003CircuitBreakerEventsAreRealNotGapped(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	c := QualityCounts{AutoSent: 5, Rated: 5, RatedCorrect: 5, CircuitEvents: 2}
+
+	r := computeQuality(c, now.Add(-time.Minute), true, now)
+
+	if !r.CircuitBreakerEvents.Present || r.CircuitBreakerEvents.Value != 2 {
+		t.Fatalf("circuit-breaker events = %v (present=%v), want 2 real (FR-M10-03)", r.CircuitBreakerEvents.Value, r.CircuitBreakerEvents.Present)
+	}
+}
+
+// TestFRM1003EditDistanceAndFollowUpAreGaps: edit distance/reason codes (M8 ISSUE-0034)
+// and customer follow-up rate (linkage telemetry) have no producer yet → gaps (spec §6).
+func TestFRM1003EditDistanceAndFollowUpAreGaps(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	r := computeQuality(QualityCounts{AutoSent: 3, Rated: 3, RatedCorrect: 2}, now, true, now)
+
+	for _, m := range []Metric{r.EditDistanceMedian, r.EditDistanceP90, r.EditReasonCodes, r.CustomerFollowUpRate} {
+		if m.Present {
+			t.Fatalf("%s must be a gap (no source telemetry yet), got present value %v", m.Name, m.Value)
+		}
+		if m.Gap == "" {
+			t.Fatalf("%s gap must name its missing source", m.Name)
+		}
+	}
+}
+
+// ── ROI (FR-M10-05) ─────────────────────────────────────────────────────────────────
+
+// TestFRM1005ROINotConfiguredSuppressesCurrencyButKeepsVolume is the ROI guardrail
+// (spec §5): with no tenant cost assumptions, currency figures render "not configured"
+// (never a default guess), while time/volume figures still render.
+func TestFRM1005ROINotConfiguredSuppressesCurrencyButKeepsVolume(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+
+	r := computeROI(200, 40, now.Add(-time.Minute), true, now, nil) // nil = not configured
+
+	if r.CostConfigured {
+		t.Fatal("cost assumptions must report not-configured when nil")
+	}
+	if !r.ContactsAutomated.Present || r.ContactsAutomated.Value != 200 {
+		t.Fatalf("contacts automated = %v, want 200 (volume renders without config)", r.ContactsAutomated.Value)
+	}
+	if !r.PeakAbsorbed.Present || r.PeakAbsorbed.Value != 40 {
+		t.Fatalf("peak absorbed = %v, want 40 (volume renders without config)", r.PeakAbsorbed.Value)
+	}
+	for _, f := range []CurrencyFigure{r.HandlingTimeSaved, r.CostPerContactBefore, r.CostPerContactAfter} {
+		if f.Present {
+			t.Fatalf("%s must not render a value when unconfigured, got %v", f.Name, f.Value)
+		}
+		if !f.NotConfigured {
+			t.Fatalf("%s must be labelled not-configured (never a default guess, FR-M10-05)", f.Name)
+		}
+		if f.Value != 0 {
+			t.Fatalf("%s must stay zero-value when not configured, got %v", f.Name, f.Value)
+		}
+	}
+}
+
+// TestFRM1005ROIConfiguredComputesInTenantCurrency: with assumptions supplied, handling-time
+// saved (hours) and cost-per-contact-before compute in the tenant's currency. Cost-per-contact
+// AFTER stays a gap — it needs the per-conversation ECO cost ledger, which is not built.
+func TestFRM1005ROIConfiguredComputesInTenantCurrency(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	a := &CostAssumptions{Currency: "EUR", AgentHourlyCost: 30, AvgHandlingMinutes: 12}
+
+	r := computeROI(100, 20, now.Add(-time.Minute), true, now, a)
+
+	if !r.CostConfigured || r.Currency != "EUR" {
+		t.Fatalf("configured=%v currency=%q, want true/EUR", r.CostConfigured, r.Currency)
+	}
+	// 100 contacts × 12 min ÷ 60 = 20 hours saved.
+	if !r.HandlingTimeSaved.Present || r.HandlingTimeSaved.Value != 20 || r.HandlingTimeSaved.Unit != "hours" {
+		t.Fatalf("handling-time saved = %v %s, want 20 hours", r.HandlingTimeSaved.Value, r.HandlingTimeSaved.Unit)
+	}
+	// before-per-contact = €30/h × 12min/60 = €6.
+	if !r.CostPerContactBefore.Present || r.CostPerContactBefore.Value != 6 || r.CostPerContactBefore.Unit != "EUR" {
+		t.Fatalf("cost per contact before = %v %s, want 6 EUR", r.CostPerContactBefore.Value, r.CostPerContactBefore.Unit)
+	}
+	if r.CostPerContactAfter.Present || r.CostPerContactAfter.Gap == "" {
+		t.Fatalf("cost per contact after must be a gap (ECO ledger not built), got present=%v gap=%q", r.CostPerContactAfter.Present, r.CostPerContactAfter.Gap)
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		found := false

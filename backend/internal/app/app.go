@@ -65,7 +65,7 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 			health.CheckerFunc{N: "nats", F: b.Health},
 		},
 	})
-	// M10 read plane (read-only, tenant-scoped): /analytics/operational, /analytics/automation.
+	// M10 read plane (read-only, tenant-scoped): /analytics/{operational,automation,quality,roi}.
 	mux.Handle("/analytics/", analytics.Handler{DB: appDB})
 
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)

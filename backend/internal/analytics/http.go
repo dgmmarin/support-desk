@@ -67,6 +67,18 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rep, e := Automation(r.Context(), tx, win, now)
 			body = rep
 			return e
+		case "quality":
+			rep, e := Quality(r.Context(), tx, win, now)
+			body = rep
+			return e
+		case "roi":
+			// Cost assumptions come from the tenant config store (ISSUE-0037), which does
+			// not exist yet — so they are always nil here and ROI renders "not configured"
+			// currency figures (never a default guess, FR-M10-05). Wiring is ready for when
+			// that producer lands: resolve the tenant's assumptions and pass them here.
+			rep, e := ROI(r.Context(), tx, win, now, nil)
+			body = rep
+			return e
 		default:
 			return errUnknownKind
 		}
