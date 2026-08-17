@@ -49,8 +49,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0017](ISSUE-0017-autonomy-policy-store.md) | Autonomy policy + trust ladder store (FR-M6-01/03) | done | M6 | M | 0003 |
 | [0018](ISSUE-0018-assemble-stage.md) | Assemble stage — build gate.Input from signals + config | done | M6 | M | 0008, 0016, 0017 |
 | [0019](ISSUE-0019-rate-limiting.md) | Rate limiting + per-recipient caps (FR-M6-06 → G13) | done | M6 | M | 0003 |
+| [0020](ISSUE-0020-deliver-stage.md) | Deliver stage (stage 9) + replay send-impossible (NFR-R-04) | done | M1 | M | 0012, 0019 |
 
-**Next id:** 0020
+**Next id:** 0021
 
 ## Conventions
 

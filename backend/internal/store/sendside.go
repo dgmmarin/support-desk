@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -62,6 +63,39 @@ func InsertSentMessage(ctx context.Context, tx pgx.Tx, s SentMessage) (string, e
 		return "", fmt.Errorf("store: insert sent message: %w", err)
 	}
 	return id, nil
+}
+
+// InsertSentMessageOnce appends a sent message idempotently on
+// (tenant, conversation, draft) — the exactly-once send key (SR-M1-01, NFR-S-04).
+// created is true only on the first insert; a redelivery returns the existing id
+// with created=false, so the Deliver stage sends exactly once. Requires a
+// non-empty DraftID.
+func InsertSentMessageOnce(ctx context.Context, tx pgx.Tx, s SentMessage) (id string, created bool, err error) {
+	status := s.DeliveryStatus
+	if status == "" {
+		status = "sent"
+	}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO sent_messages (tenant_id, conversation_id, draft_id, content, sender, disclosure_text, delivery_status)
+		VALUES (cur_tenant(), $1, $2, $3, $4, $5, $6)
+		ON CONFLICT (tenant_id, conversation_id, draft_id) DO NOTHING
+		RETURNING id`,
+		s.ConversationID, s.DraftID, s.Content, s.Sender, s.DisclosureText, status,
+	).Scan(&id)
+	if err == nil {
+		return id, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", false, fmt.Errorf("store: insert sent message once: %w", err)
+	}
+	// Conflict — already sent for this case. Return the existing id.
+	err = tx.QueryRow(ctx,
+		`SELECT id FROM sent_messages WHERE tenant_id = cur_tenant() AND conversation_id = $1 AND draft_id = $2`,
+		s.ConversationID, s.DraftID).Scan(&id)
+	if err != nil {
+		return "", false, fmt.Errorf("store: fetch existing sent message: %w", err)
+	}
+	return id, false, nil
 }
 
 // GetSentMessageByDraft returns the sent message for a draft, if any.
