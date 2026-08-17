@@ -64,7 +64,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0032](ISSUE-0032-m10-analytics-read-plane.md) | M10 analytics read/aggregate plane (foundation) + operational & automation aggregation | done | M10 | M | 0031 |
 | [0033](ISSUE-0033-m10-quality-roi.md) | M10 quality analytics + ROI view (rated/unrated split, not-configured currency) | done | M10 | M | 0032 |
 | [0034](ISSUE-0034-m8-edit-delta-feedback-capture.md) | Draft↔sent edit-delta + structured feedback/reason-code capture + classification-override hook | done | M8 | M | 0012, 0031 |
-| [0035](ISSUE-0035-m8-audit-sampling-customer-signal.md) | Post-send audit sampling + customer-signal feedback | todo | M8 | M | 0034, 0016 |
+| [0035](ISSUE-0035-m8-audit-sampling-customer-signal.md) | Post-send audit sampling + customer-signal feedback | done | M8 | M | 0034, 0016 |
 | [0036](ISSUE-0036-m8-eval-set-regression-gate.md) | Frozen eval set + regression gate + change-log/rollback + tenant-isolated learning guard | todo | M8 | M | 0023, 0017 |
 | [0037](ISSUE-0037-m11-tenant-config-store.md) | Per-tenant configuration store (brands, mailboxes, languages, SLAs, voice, disclosure text, exclusion lists, retention) | todo | M11 | M | 0003 |
 | [0038](ISSUE-0038-m3-entity-extraction.md) | M3 entity extraction (booking ref, destination, dates, pax, flight no., amounts) | todo | M3 | M | 0024 |
