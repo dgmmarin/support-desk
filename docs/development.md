@@ -18,7 +18,7 @@ That's it — `setup` installs the toolchain, copies `.env.example` → `.env`, 
 
 | Service | Image | Port(s) | Role | Spec |
 |---|---|---|---|---|
-| **postgres** | `paradedb/paradedb` | 5432 | Source of truth; RLS isolation; `pgvector` + `pg_search` (BM25) | ADR-0015, ADR-0012 |
+| **postgres** | `paradedb/paradedb` | 5433 | Source of truth; RLS isolation; `pgvector` + `pg_search` (BM25) | ADR-0015, ADR-0012 |
 | **nats** | `nats` (JetStream) | 4222, 8222 | Inter-service/-process bus **and** durable pipeline queue | ADR-0030, pipeline §3 |
 | **tika** | `apache/tika:*-full` | 9998 | Document text extraction + OCR (Tesseract bundled) | FR-M4-02, FR-M1-09 |
 | **clamav** | `clamav/clamav` | 3310 | Attachment malware scanning | SEC-07, FR-M1-09 |
