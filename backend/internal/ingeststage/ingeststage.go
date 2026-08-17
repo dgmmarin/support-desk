@@ -1,14 +1,14 @@
 // Package ingeststage runs the M1 ingest core (stage 1) on the pipeline runner.
 // Input payloads carry the raw MIME bytes (base64 in JSON); the stage parses,
-// threads, dedupes and loop-checks (all in ingest.Ingestor), then routes the
-// result to the Screen stage or — on a parse failure — to quarantine, never
-// dropping a message (FR-M1-04, NFR-R-02).
+// threads, dedupes and loop-checks (ingest.Process), then routes the result to
+// the Screen stage or — on a parse failure — to quarantine, never dropping a
+// message (FR-M1-04, NFR-R-02).
 //
-// The stage is idempotent per case (NFR-S-04): a redelivered message returns the
-// first decision it produced, so at-least-once delivery cannot flip an ingested
-// message into a false "duplicate" by reprocessing it against mutated core state.
-// Genuine customer resends arrive as a new case (new correlation id) and are still
-// detected as duplicates by the core.
+// With a non-nil store the stage threads and persists against Postgres under the
+// case's tenant scope (ISSUE-0010); with a nil store it uses an in-memory Ingestor
+// (tests / pure-routing). Either way the stage is idempotent per case: a
+// redelivery returns the first decision, so at-least-once delivery cannot flip an
+// ingested message into a false duplicate.
 package ingeststage
 
 import (
@@ -16,14 +16,16 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"tourdesk/internal/ingest"
 	"tourdesk/internal/pipeline"
+	"tourdesk/internal/store"
 )
 
-// rawInput is the stage's input payload: raw MIME bytes (JSON-encoded as base64).
 type rawInput struct {
 	Raw []byte `json:"raw"`
 }
@@ -44,27 +46,31 @@ type IngestedEvent struct {
 }
 
 type stage struct {
-	ing               *ingest.Ingestor
+	db                *store.DB       // nil → in-memory path
+	mem               *ingest.Ingestor // used when db == nil
 	screenSubject     string
 	quarantineSubject string
 
-	// mu serialises the whole handler so core-state mutation and the idempotency
-	// cache stay consistent under at-least-once redelivery.
-	// ponytail: single-instance serialisation; horizontal scale = separate stage
-	// instances. seen grows with cases, matching the in-memory core's ceiling
-	// (the DB-backed follow-up bounds both).
+	// mu serialises the handler so threading state + the idempotency cache stay
+	// consistent under at-least-once redelivery.
+	// ponytail: single-instance serialisation; horizontal scale = separate
+	// instances; the multi-instance conversation-create race is a documented
+	// follow-up (advisory locks per thread key).
 	mu   sync.Mutex
 	seen map[string]pipeline.Decision
 }
 
-// Serve runs the ingest stage. screenSubject receives ingested/duplicate events;
-// quarantineSubject receives parse failures.
-func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, inStream, inSubject, screenSubject, quarantineSubject string) (stop func(), err error) {
+// Serve runs the ingest stage. Pass a non-nil db to thread + persist against
+// Postgres (production); pass nil for the in-memory path.
+func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, db *store.DB, inStream, inSubject, screenSubject, quarantineSubject string) (stop func(), err error) {
 	s := &stage{
-		ing:               ingest.New(nil), // time.Now
+		db:                db,
 		screenSubject:     screenSubject,
 		quarantineSubject: quarantineSubject,
 		seen:              map[string]pipeline.Decision{},
+	}
+	if db == nil {
+		s.mem = ingest.New(nil)
 	}
 	return pipeline.Run(ctx, js, logger, pipeline.Config{
 		Name:              "ingest",
@@ -75,7 +81,7 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, inS
 	}, s.handle)
 }
 
-func (s *stage) handle(_ context.Context, env pipeline.Envelope) (pipeline.Decision, error) {
+func (s *stage) handle(ctx context.Context, env pipeline.Envelope) (pipeline.Decision, error) {
 	var in rawInput
 	if err := json.Unmarshal(env.Payload, &in); err != nil {
 		return pipeline.Decision{}, err // malformed envelope payload → fail closed
@@ -84,13 +90,24 @@ func (s *stage) handle(_ context.Context, env pipeline.Envelope) (pipeline.Decis
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Redelivery of the same case → return the first decision, don't reprocess.
-	key := env.IdempotencyKey()
-	if d, ok := s.seen[key]; ok {
-		return d, nil
+	if d, ok := s.seen[env.IdempotencyKey()]; ok {
+		return d, nil // redelivery → the first decision, don't reprocess/re-persist
 	}
 
-	res := s.ing.Process(in.Raw)
+	var res ingest.Result
+	if s.db != nil {
+		err := store.WithTenant(ctx, s.db.Pool, env.TenantID, func(tx pgx.Tx) error {
+			r, e := ingest.Process(ctx, store.IngestRepo{Tx: tx}, in.Raw, time.Now())
+			res = r
+			return e
+		})
+		if err != nil {
+			return pipeline.Decision{}, err // DB error → fail closed (routed to screen/human)
+		}
+	} else {
+		res = s.mem.Process(in.Raw)
+	}
+
 	evt := IngestedEvent{
 		CorrelationID:    env.CorrelationID,
 		ConversationID:   res.ConversationID,
@@ -108,6 +125,6 @@ func (s *stage) handle(_ context.Context, env pipeline.Envelope) (pipeline.Decis
 		subject = s.quarantineSubject
 	}
 	dec := pipeline.Decision{Subject: subject, Payload: evt}
-	s.seen[key] = dec
+	s.seen[env.IdempotencyKey()] = dec
 	return dec, nil
 }

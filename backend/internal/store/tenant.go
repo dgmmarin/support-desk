@@ -28,11 +28,10 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn fun
 	if err != nil {
 		return fmt.Errorf("store: begin: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback(ctx)
-		}
-	}()
+	// Always attempt rollback on return — a no-op after a successful Commit, but it
+	// guarantees the transaction is released even if fn panics or calls runtime.Goexit
+	// (e.g. t.Fatalf in a test), which would otherwise leak an idle-in-transaction conn.
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err = tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
 		return fmt.Errorf("store: set tenant scope: %w", err)

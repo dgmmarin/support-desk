@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -30,43 +31,130 @@ type Result struct {
 	QuarantineReason string
 }
 
-// fallbackWindow bounds the header-absent threading heuristic (FR-M1-05).
+// FallbackWindow bounds the header-absent threading heuristic (FR-M1-05).
 // ponytail: fixed 7d; the real window is tuned against an archive (M1 §8).
-const fallbackWindow = 7 * 24 * time.Hour
+const FallbackWindow = 7 * 24 * time.Hour
 
 // autoReplyBlockAfter blocks auto-send once this many auto-replies from an
 // address have been seen (FR-M1-06: block after the 2nd inbound auto-reply).
 const autoReplyBlockAfter = 2
 
-type conversation struct {
-	id           string
-	subject      string // normalised
-	participants map[string]bool
-	lastActivity time.Time
+// Repo is the threading/dedup/loop-cap state the orchestration operates over.
+// Implementations: memRepo (in-memory) and store.IngestRepo (Postgres, tenant-
+// scoped). Keeping the orchestration in Process means the safety-critical ordering
+// lives in one place regardless of backend.
+type Repo interface {
+	// Duplicate reports whether a message with this id or body hash was already ingested.
+	Duplicate(ctx context.Context, messageID, bodyHash string) (bool, error)
+	// FindConversation returns an existing conversation id via header chain
+	// (parents) then fallback (subjectNorm + participant + window), or "" if none.
+	FindConversation(ctx context.Context, parents []string, subjectNorm string, participants []string, t time.Time) (string, error)
+	// CreateConversation creates a new conversation and returns its id.
+	CreateConversation(ctx context.Context, subjectNorm string, participants []string, t time.Time) (string, error)
+	// AutoReplyCount returns prior auto-replies from fromEmail within the loop window.
+	AutoReplyCount(ctx context.Context, fromEmail string, t time.Time) (int, error)
+	// RecordMessage persists the message under conversationID and updates state.
+	RecordMessage(ctx context.Context, conversationID, bodyHash string, msg NormalisedMessage, t time.Time) error
 }
 
-// Ingestor holds the in-memory threading/dedup/loop state for a stream of
-// messages. It is safe for concurrent use. State is per-instance; the DB-backed
-// version (a follow-up issue) will persist the same decisions.
+// Process parses and dispositions one raw message against repo. Deterministic
+// given repo + now. The ordering is the contract: dedup → thread (header chain,
+// then fallback) → record → loop-cap; a parse failure quarantines (never drops).
+func Process(ctx context.Context, repo Repo, raw []byte, now time.Time) (Result, error) {
+	msg, err := Parse(raw)
+	if err != nil {
+		return Result{Outcome: Quarantined, QuarantineReason: err.Error()}, nil
+	}
+	bodyHash := hashBody(msg)
+
+	dup, err := repo.Duplicate(ctx, msg.MessageID, bodyHash)
+	if err != nil {
+		return Result{}, err
+	}
+	if dup {
+		return Result{Message: msg, Outcome: Duplicate, DuplicateOf: msg.MessageID, Automated: msg.Automated}, nil
+	}
+
+	t := effectiveTime(msg, now)
+	parents := parentCandidates(msg)
+	participants := participantList(msg)
+	subjectNorm := normaliseSubject(msg.Subject)
+
+	convID, err := repo.FindConversation(ctx, parents, subjectNorm, participants, t)
+	if err != nil {
+		return Result{}, err
+	}
+	if convID == "" {
+		if convID, err = repo.CreateConversation(ctx, subjectNorm, participants, t); err != nil {
+			return Result{}, err
+		}
+	}
+
+	res := Result{Message: msg, ConversationID: convID, Outcome: Ingested, Automated: msg.Automated}
+
+	if msg.Automated && msg.From.Email != "" {
+		// Count prior auto-replies BEFORE recording this one, so the cap blocks
+		// from the (autoReplyBlockAfter+1)-th message.
+		prior, err := repo.AutoReplyCount(ctx, strings.ToLower(msg.From.Email), t)
+		if err != nil {
+			return Result{}, err
+		}
+		if prior >= autoReplyBlockAfter {
+			res.SuppressAutoSend = true
+		}
+	}
+
+	if err := repo.RecordMessage(ctx, convID, bodyHash, msg, t); err != nil {
+		return Result{}, err
+	}
+	return res, nil
+}
+
+// Ingestor is the in-memory convenience wrapper (used by unit tests and the
+// nil-store stage): it holds a memRepo and a clock and exposes the simple
+// Process(raw) API.
 type Ingestor struct {
-	now func() time.Time
-
-	mu             sync.Mutex
-	seq            int
-	convByParent   map[string]*conversation // message-id → conversation
-	conversations  []*conversation
-	seenMessageIDs map[string]bool
-	seenBodyHashes map[string]bool
-	autoReplyCount map[string]int // sender email → count of auto-replies seen
+	repo *memRepo
+	now  func() time.Time
 }
 
-// New returns an Ingestor. If now is nil, time.Now is used.
+// New returns an in-memory Ingestor. If now is nil, time.Now is used.
 func New(now func() time.Time) *Ingestor {
 	if now == nil {
 		now = time.Now
 	}
-	return &Ingestor{
-		now:            now,
+	return &Ingestor{repo: newMemRepo(), now: now}
+}
+
+// Process dispositions one raw message against the in-memory state.
+func (in *Ingestor) Process(raw []byte) Result {
+	r, _ := Process(context.Background(), in.repo, raw, in.now())
+	return r
+}
+
+// --- in-memory Repo ---
+
+type conversation struct {
+	id           string
+	subject      string
+	participants map[string]bool
+	lastActivity time.Time
+}
+
+type memRepo struct {
+	mu             sync.Mutex
+	seq            int
+	convByID       map[string]*conversation
+	convByParent   map[string]*conversation
+	conversations  []*conversation
+	seenMessageIDs map[string]bool
+	seenBodyHashes map[string]bool
+	autoReplyCount map[string]int
+}
+
+func newMemRepo() *memRepo {
+	return &memRepo{
+		convByID:       map[string]*conversation{},
 		convByParent:   map[string]*conversation{},
 		seenMessageIDs: map[string]bool{},
 		seenBodyHashes: map[string]bool{},
@@ -74,102 +162,102 @@ func New(now func() time.Time) *Ingestor {
 	}
 }
 
-// Process parses and dispositions one raw message.
-func (in *Ingestor) Process(raw []byte) Result {
-	msg, err := Parse(raw)
-	if err != nil {
-		// FR-M1-04: never lose a message to a parse failure — quarantine it.
-		return Result{Outcome: Quarantined, QuarantineReason: err.Error()}
+func (m *memRepo) Duplicate(_ context.Context, messageID, bodyHash string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if messageID != "" && m.seenMessageIDs[messageID] {
+		return true, nil
 	}
-
-	in.mu.Lock()
-	defer in.mu.Unlock()
-
-	// Deduplicate before threading so a resend never creates a new conversation.
-	if msg.MessageID != "" && in.seenMessageIDs[msg.MessageID] {
-		return Result{Message: msg, Outcome: Duplicate, DuplicateOf: msg.MessageID, Automated: msg.Automated}
-	}
-	bodyHash := hashBody(msg)
-	if in.seenBodyHashes[bodyHash] {
-		return Result{Message: msg, Outcome: Duplicate, DuplicateOf: msg.MessageID, Automated: msg.Automated}
-	}
-
-	conv := in.thread(msg)
-
-	// Record state.
-	if msg.MessageID != "" {
-		in.seenMessageIDs[msg.MessageID] = true
-		in.convByParent[msg.MessageID] = conv
-	}
-	in.seenBodyHashes[bodyHash] = true
-	conv.lastActivity = laterTime(conv.lastActivity, in.effectiveTime(msg))
-	for p := range msg.Participants() {
-		conv.participants[p] = true
-	}
-
-	res := Result{Message: msg, ConversationID: conv.id, Outcome: Ingested, Automated: msg.Automated}
-
-	// Loop cap: block auto-send once this sender has auto-replied too many times.
-	if msg.Automated && msg.From.Email != "" {
-		key := strings.ToLower(msg.From.Email)
-		prior := in.autoReplyCount[key]
-		if prior >= autoReplyBlockAfter {
-			res.SuppressAutoSend = true
-		}
-		in.autoReplyCount[key] = prior + 1
-	}
-	return res
+	return m.seenBodyHashes[bodyHash], nil
 }
 
-// thread finds the conversation for msg: header chain first, then the fallback
-// heuristic, else a new conversation (erring toward new to avoid cross-customer
-// mixing — FR-M1-05).
-func (in *Ingestor) thread(msg NormalisedMessage) *conversation {
-	for _, parent := range parentCandidates(msg) {
-		if c := in.convByParent[parent]; c != nil {
-			return c
+func (m *memRepo) FindConversation(_ context.Context, parents []string, subjectNorm string, participants []string, t time.Time) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range parents {
+		if c := m.convByParent[p]; c != nil {
+			return c.id, nil
 		}
 	}
-	if c := in.fallbackConversation(msg); c != nil {
-		return c
+	if subjectNorm == "" {
+		return "", nil
 	}
-	in.seq++
+	pset := toSet(participants)
+	for _, c := range m.conversations {
+		if c.subject != subjectNorm || !sharesParticipant(c.participants, pset) {
+			continue
+		}
+		if absDuration(t.Sub(c.lastActivity)) > FallbackWindow {
+			continue
+		}
+		return c.id, nil
+	}
+	return "", nil
+}
+
+func (m *memRepo) CreateConversation(_ context.Context, subjectNorm string, participants []string, t time.Time) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seq++
 	c := &conversation{
-		id:           fmt.Sprintf("conv-%d", in.seq),
-		subject:      normaliseSubject(msg.Subject),
-		participants: map[string]bool{},
+		id:           fmt.Sprintf("conv-%d", m.seq),
+		subject:      subjectNorm,
+		participants: toSet(participants),
+		lastActivity: t,
 	}
-	in.conversations = append(in.conversations, c)
-	return c
+	m.convByID[c.id] = c
+	m.conversations = append(m.conversations, c)
+	return c.id, nil
 }
 
-func (in *Ingestor) fallbackConversation(msg NormalisedMessage) *conversation {
-	subj := normaliseSubject(msg.Subject)
-	if subj == "" {
-		return nil
+func (m *memRepo) AutoReplyCount(_ context.Context, fromEmail string, _ time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.autoReplyCount[fromEmail], nil
+}
+
+func (m *memRepo) RecordMessage(_ context.Context, conversationID, bodyHash string, msg NormalisedMessage, t time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.convByID[conversationID]
+	if c == nil {
+		return fmt.Errorf("ingest: unknown conversation %q", conversationID)
 	}
-	parts := msg.Participants()
-	t := in.effectiveTime(msg)
-	for _, c := range in.conversations {
-		if c.subject != subj {
-			continue
-		}
-		if !sharesParticipant(c.participants, parts) {
-			continue
-		}
-		if absDuration(t.Sub(c.lastActivity)) > fallbackWindow {
-			continue
-		}
-		return c
+	if msg.MessageID != "" {
+		m.seenMessageIDs[msg.MessageID] = true
+		m.convByParent[msg.MessageID] = c
+	}
+	m.seenBodyHashes[bodyHash] = true
+	c.lastActivity = laterTime(c.lastActivity, t)
+	for p := range msg.Participants() {
+		c.participants[p] = true
+	}
+	if msg.Automated && msg.From.Email != "" {
+		m.autoReplyCount[strings.ToLower(msg.From.Email)]++
 	}
 	return nil
 }
 
-func (in *Ingestor) effectiveTime(msg NormalisedMessage) time.Time {
-	if msg.Date.IsZero() {
-		return in.now()
+// --- shared helpers ---
+
+func participantList(msg NormalisedMessage) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(e string) {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e != "" && !seen[e] {
+			seen[e] = true
+			out = append(out, e)
+		}
 	}
-	return msg.Date
+	add(msg.From.Email) // From first — used as the conversation's customer email
+	for _, a := range msg.To {
+		add(a.Email)
+	}
+	for _, a := range msg.Cc {
+		add(a.Email)
+	}
+	return out
 }
 
 func parentCandidates(msg NormalisedMessage) []string {
@@ -177,7 +265,6 @@ func parentCandidates(msg NormalisedMessage) []string {
 	if msg.InReplyTo != "" {
 		out = append(out, msg.InReplyTo)
 	}
-	// References list, most recent (last) first.
 	for i := len(msg.References) - 1; i >= 0; i-- {
 		out = append(out, msg.References[i])
 	}
@@ -187,6 +274,14 @@ func parentCandidates(msg NormalisedMessage) []string {
 func hashBody(msg NormalisedMessage) string {
 	h := sha256.Sum256([]byte(strings.ToLower(msg.From.Email) + "\x00" + normaliseSubject(msg.Subject) + "\x00" + msg.Text))
 	return hex.EncodeToString(h[:])
+}
+
+func toSet(items []string) map[string]bool {
+	s := make(map[string]bool, len(items))
+	for _, i := range items {
+		s[strings.ToLower(i)] = true
+	}
+	return s
 }
 
 func sharesParticipant(a, b map[string]bool) bool {
@@ -213,6 +308,13 @@ func normaliseSubject(s string) string {
 		}
 	}
 	return strings.Join(strings.Fields(s), " ")
+}
+
+func effectiveTime(msg NormalisedMessage, now time.Time) time.Time {
+	if msg.Date.IsZero() {
+		return now
+	}
+	return msg.Date
 }
 
 func laterTime(a, b time.Time) time.Time {

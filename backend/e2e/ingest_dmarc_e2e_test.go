@@ -52,7 +52,7 @@ func TestE2EIngestEmitsDmarcVerdict(t *testing.T) {
 	}
 	t.Cleanup(func() { js.DeleteStream(ctx, inStream); js.DeleteStream(ctx, outStream) })
 
-	stop, err := ingeststage.Serve(ctx, js, logger, inStream, inSubject, screen, outBase+".quarantine")
+	stop, err := ingeststage.Serve(ctx, js, logger, nil, inStream, inSubject, screen, outBase+".quarantine")
 	if err != nil {
 		t.Fatalf("serve: %v", err)
 	}
