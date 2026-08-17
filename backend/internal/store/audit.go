@@ -38,12 +38,12 @@ func InsertAuditRecord(ctx context.Context, tx pgx.Tx, a AuditRecord) (string, e
 }
 
 // Chain is the reconstructed audit trail anchored on a SentMessage (INV-5). As
-// more modules land (Understanding, Citation, identity, ReviewAction) they extend
-// this struct.
+// more modules land (Understanding, Citation, identity) they extend this struct.
 type Chain struct {
 	Sent     SentMessage
 	Draft    Draft
 	Gate     GateEvaluation
+	Reviews  []ReviewAction // human edits/overrides on the draft (M8, INV-5)
 	Messages []Message
 }
 
@@ -81,6 +81,11 @@ func ReconstructChain(ctx context.Context, tx pgx.Tx, sentMessageID string) (Cha
 			Scan(&c.Gate.ID, &c.Gate.ConversationID, &c.Gate.DraftID, &c.Gate.Outcome, &c.Gate.Route, &c.Gate.Conditions); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return Chain{}, fmt.Errorf("store: reconstruct: gate evaluation: %w", err)
 		}
+		reviews, err := GetReviewActionsByDraft(ctx, tx, draftID)
+		if err != nil {
+			return Chain{}, fmt.Errorf("store: reconstruct: review actions: %w", err)
+		}
+		c.Reviews = reviews
 	}
 
 	msgs, err := GetMessagesByConversation(ctx, tx, c.Sent.ConversationID)
