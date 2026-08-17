@@ -72,11 +72,18 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			body = rep
 			return e
 		case "roi":
-			// Cost assumptions come from the tenant config store (ISSUE-0037), which does
-			// not exist yet — so they are always nil here and ROI renders "not configured"
-			// currency figures (never a default guess, FR-M10-05). Wiring is ready for when
-			// that producer lands: resolve the tenant's assumptions and pass them here.
-			rep, e := ROI(r.Context(), tx, win, now, nil)
+			// Cost assumptions come from the tenant config store (ISSUE-0037). When a tenant
+			// has not configured them this is nil and ROI renders "not configured" currency
+			// figures (never a default guess, FR-M10-05).
+			cfg, e := store.GetCostAssumptions(r.Context(), tx)
+			if e != nil {
+				return e
+			}
+			var a *CostAssumptions
+			if cfg != nil {
+				a = &CostAssumptions{Currency: cfg.Currency, AgentHourlyCost: cfg.AgentHourlyCost, AvgHandlingMinutes: cfg.AvgHandlingMinutes}
+			}
+			rep, e := ROI(r.Context(), tx, win, now, a)
 			body = rep
 			return e
 		default:

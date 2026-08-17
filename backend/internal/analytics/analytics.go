@@ -332,9 +332,9 @@ func Quality(ctx context.Context, tx pgx.Tx, w Window, now time.Time) (QualityRe
 
 // ── ROI (FR-M10-05) ────────────────────────────────────────────────────────────────
 
-// CostAssumptions are the tenant's configured agent-cost figures. They come from the tenant
-// config store (future producer ISSUE-0037); until that exists this is always nil and ROI
-// renders "not configured" for currency figures (never a default guess, FR-M10-05).
+// CostAssumptions are the tenant's configured agent-cost figures. They are resolved from the
+// tenant config store (ISSUE-0037, cost section); when a tenant has not configured them this is
+// nil and ROI renders "not configured" for currency figures (never a default guess, FR-M10-05).
 type CostAssumptions struct {
 	Currency           string  // ISO code, e.g. "EUR"
 	AgentHourlyCost    float64 // fully-loaded agent cost per hour, in Currency
@@ -375,7 +375,7 @@ const roiFormula = "contacts_automated = auto-sent cases; peak_absorbed = busies
 	"cost_per_contact_before = agent_hourly_cost × avg_handling_minutes ÷ 60 (tenant currency); " +
 	"currency figures require configured cost assumptions — otherwise 'not configured', never a default guess"
 
-const notConfiguredNote = "tenant agent-cost assumptions not configured (future producer ISSUE-0037); " +
+const notConfiguredNote = "tenant agent-cost assumptions not configured (tenant config store, ISSUE-0037); " +
 	"currency figures suppressed — never a default guess (FR-M10-05)"
 
 func computeROI(contactsAutomated, peakAbsorbed int, latest time.Time, hasRows bool, now time.Time, a *CostAssumptions) ROIReport {
