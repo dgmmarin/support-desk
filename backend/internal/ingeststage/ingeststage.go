@@ -38,6 +38,7 @@ type IngestedEvent struct {
 	Subject          string         `json:"subject,omitempty"`
 	Automated        bool           `json:"automated"`
 	SuppressAutoSend bool           `json:"suppress_auto_send"`
+	DMARCPass        bool           `json:"dmarc_pass"`
 	DuplicateOf      string         `json:"duplicate_of,omitempty"`
 	QuarantineReason string         `json:"quarantine_reason,omitempty"`
 }
@@ -98,6 +99,7 @@ func (s *stage) handle(_ context.Context, env pipeline.Envelope) (pipeline.Decis
 		Subject:          res.Message.Subject,
 		Automated:        res.Automated,
 		SuppressAutoSend: res.SuppressAutoSend,
+		DMARCPass:        res.Message.Auth.DMARCPass,
 		DuplicateOf:      res.DuplicateOf,
 		QuarantineReason: res.QuarantineReason,
 	}

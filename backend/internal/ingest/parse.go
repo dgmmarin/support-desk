@@ -17,6 +17,8 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+
+	"tourdesk/internal/mailauth"
 )
 
 // Address is a mail participant.
@@ -35,9 +37,10 @@ type NormalisedMessage struct {
 	Cc         []Address
 	Subject    string
 	Date       time.Time
-	Text       string // best-effort plain text (HTML fallback)
-	Automated  bool   // auto-responder / bulk / DSN (FR-M1-06)
-	Bounce     bool   // DSN / bounce (FR-M1-07, minimal)
+	Text       string          // best-effort plain text (HTML fallback)
+	Automated  bool            // auto-responder / bulk / DSN (FR-M1-06)
+	Bounce     bool            // DSN / bounce (FR-M1-07, minimal)
+	Auth       mailauth.Result // inbound SPF/DKIM/DMARC verdicts (FR-M1-08)
 	header     mail.Header
 }
 
@@ -66,6 +69,7 @@ func Parse(raw []byte) (NormalisedMessage, error) {
 	nm.Text = extractText(h, m.Body)
 	nm.Bounce = isBounce(h)
 	nm.Automated = isAutomated(h) || nm.Bounce
+	nm.Auth = mailauth.Parse(h.Get("Authentication-Results"))
 	return nm, nil
 }
 

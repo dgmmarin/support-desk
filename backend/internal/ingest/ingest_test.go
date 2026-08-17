@@ -115,6 +115,29 @@ func TestFRM106LoopCapBlocksAfterSecondAutoReply(t *testing.T) {
 	}
 }
 
+// test_ingest_populates_auth_result (FR-M1-08)
+func TestIngestPopulatesAuthResult(t *testing.T) {
+	pass, err := Parse(rawMsg(map[string]string{
+		"Message-ID": "<auth@x>", "From": "cust@x.com", "To": "support@op.com",
+		"Subject": "Hi", "Date": base.Format(time.RFC1123Z),
+		"Authentication-Results": "mx.op.com; spf=pass; dkim=pass; dmarc=pass header.from=x.com",
+	}, "body"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !pass.Auth.DMARCPass {
+		t.Fatalf("expected DMARCPass true, got %+v", pass.Auth)
+	}
+
+	fail, _ := Parse(rawMsg(map[string]string{
+		"Message-ID": "<auth2@x>", "From": "cust@x.com", "To": "support@op.com",
+		"Subject": "Hi", "Date": base.Format(time.RFC1123Z),
+	}, "no auth header"))
+	if fail.Auth.DMARCPass {
+		t.Fatal("expected DMARCPass false when header absent (fail-closed)")
+	}
+}
+
 // test_FR_M1_04_malformed_message_is_quarantined_not_dropped
 func TestFRM104MalformedMessageIsQuarantined(t *testing.T) {
 	in := New(fixedClock())

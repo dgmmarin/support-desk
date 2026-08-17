@@ -38,8 +38,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0006](ISSUE-0006-m1-attachment-scanning.md) | M1 attachment scanning (ClamAV, Tika, PII masking) | done | M1 | M | 0004 |
 | [0007](ISSUE-0007-persistence-immutability.md) | Persistence layer (Message/GateEvaluation/Attachment) + RLS + immutability | done | — | M | 0003 |
 | [0008](ISSUE-0008-gate-persist-evaluation.md) | Gate stage persists GateEvaluation (durable, idempotent, fail-closed) | done | M6 | M | 0002, 0007 |
+| [0009](ISSUE-0009-dmarc-auth-verification.md) | Inbound DMARC/SPF/DKIM verification | done | M1 | M | 0005 |
 
-**Next id:** 0009
+**Next id:** 0010
 
 ## Conventions
 
