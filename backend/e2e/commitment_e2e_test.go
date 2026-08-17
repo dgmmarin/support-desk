@@ -83,9 +83,7 @@ func TestE2ECommitmentGuardrailBlocksUnsourced(t *testing.T) {
 			if err != nil {
 				break
 			}
-			var e commitmentstage.CheckedEvent
-			_ = json.Unmarshal(m.Data(), &e)
-			out = append(out, e)
+			out = append(out, unwrap[commitmentstage.CheckedEvent](t, m.Data()))
 			_ = m.Ack()
 			w = 500 * time.Millisecond
 		}

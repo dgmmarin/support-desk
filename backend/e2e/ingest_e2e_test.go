@@ -148,11 +148,7 @@ func drainEvents(t *testing.T, ctx context.Context, js jetstream.JetStream, stre
 		if err != nil {
 			break
 		}
-		var e ingeststage.IngestedEvent
-		if err := json.Unmarshal(m.Data(), &e); err != nil {
-			t.Fatalf("decode event: %v", err)
-		}
-		out = append(out, e)
+		out = append(out, unwrap[ingeststage.IngestedEvent](t, m.Data()))
 		_ = m.Ack()
 		wait = 500 * time.Millisecond
 	}

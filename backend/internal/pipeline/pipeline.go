@@ -129,7 +129,19 @@ func handle(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, cf
 		return
 	}
 
-	out, merr := json.Marshal(dec.Payload)
+	// Wrap the stage output in an Envelope that carries the case identity forward
+	// (correlation id spans every stage — NFR-R-01; tenant/conversation/draft flow
+	// to downstream stages and persistence). Only the payload changes per stage.
+	payload, merr := json.Marshal(dec.Payload)
+	if merr == nil {
+		payload, merr = json.Marshal(Envelope{
+			CorrelationID:  env.CorrelationID,
+			TenantID:       env.TenantID,
+			ConversationID: env.ConversationID,
+			DraftID:        env.DraftID,
+			Payload:        payload,
+		})
+	}
 	if merr != nil {
 		// A result we cannot serialise is a bug, not customer data → fail closed.
 		if perr := publish(ctx, js, cfg.HumanSubject, msg.Data(), env.IdempotencyKey()+":human"); perr != nil {
@@ -143,7 +155,7 @@ func handle(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, cf
 	}
 
 	// Idempotent hand-off: same key ⇒ the next stream stores exactly one message.
-	if perr := publish(ctx, js, dec.Subject, out, env.IdempotencyKey()); perr != nil {
+	if perr := publish(ctx, js, dec.Subject, payload, env.IdempotencyKey()); perr != nil {
 		log.Error("hand-off publish failed; will redeliver", "err", perr)
 		_ = msg.Nak()
 		return

@@ -84,10 +84,7 @@ func TestE2EScreenRoutesByClass(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected a message on %s: %v", subject, err)
 		}
-		var e screenstage.ScreenedEvent
-		if err := json.Unmarshal(m.Data(), &e); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		e := unwrap[screenstage.ScreenedEvent](t, m.Data())
 		if e.Action != want {
 			t.Fatalf("%s: action = %s, want %s", subject, e.Action, want)
 		}

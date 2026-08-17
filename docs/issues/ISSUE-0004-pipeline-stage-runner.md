@@ -66,3 +66,4 @@ tuning — separate issues. This establishes the runner and its contract.
     fail-closed→human/0-output, poison→quarantine + following good message processed) and the refactored
     `TestE2EGateRoutesCaseToCorrectQueue` still green.
   Status → done. Follow-ups (out of scope): replay-mode build (NFR-R-04), alert wiring (NFR-R-03).
+- 2026-08-17 fix (found via ISSUE-0018 assemble→gate chaining): the runner previously published `dec.Payload` raw, dropping the Envelope so correlation/tenant/conversation ids did not propagate across stages (NFR-R-01 gap). Now each stage output is wrapped in an Envelope carrying those ids forward; downstream stages and E2E decoders read Envelope→Payload. Regression: full unit/integration/e2e suite green.

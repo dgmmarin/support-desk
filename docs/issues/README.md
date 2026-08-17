@@ -47,8 +47,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0015](ISSUE-0015-commitment-guardrail.md) | Commitment guardrail (ADR-0006 → G10) | done | M5 | M | 0004 |
 | [0016](ISSUE-0016-killswitch-circuitbreaker.md) | Kill switch + circuit breaker store (FR-M6-04/05 → G01/G13) | done | M6 | M | 0003 |
 | [0017](ISSUE-0017-autonomy-policy-store.md) | Autonomy policy + trust ladder store (FR-M6-01/03) | done | M6 | M | 0003 |
+| [0018](ISSUE-0018-assemble-stage.md) | Assemble stage — build gate.Input from signals + config | done | M6 | M | 0008, 0016, 0017 |
 
-**Next id:** 0018
+**Next id:** 0019
 
 ## Conventions
 

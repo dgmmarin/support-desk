@@ -140,11 +140,7 @@ func drainResults(t *testing.T, ctx context.Context, js jetstream.JetStream, str
 		if err != nil {
 			break
 		}
-		var r attach.Result
-		if err := json.Unmarshal(m.Data(), &r); err != nil {
-			t.Fatalf("decode result: %v", err)
-		}
-		out = append(out, r)
+		out = append(out, unwrap[attach.Result](t, m.Data()))
 		_ = m.Ack()
 		wait = time.Second
 	}

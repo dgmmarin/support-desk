@@ -115,10 +115,7 @@ func TestE2EGateRoutesCaseToCorrectQueue(t *testing.T) {
 		if err != nil {
 			t.Fatalf("consume routed result %d/%d: %v", i+1, len(cases), err)
 		}
-		var res gate.Result
-		if err := json.Unmarshal(msg.Data(), &res); err != nil {
-			t.Fatalf("decode result: %v", err)
-		}
+		res := unwrap[gate.Result](t, msg.Data())
 		got[res.Route] = struct {
 			outcome gate.Outcome
 			subject string

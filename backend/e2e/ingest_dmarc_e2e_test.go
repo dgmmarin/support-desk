@@ -86,10 +86,7 @@ func TestE2EIngestEmitsDmarcVerdict(t *testing.T) {
 		if err != nil {
 			t.Fatalf("consume %d: %v", i, err)
 		}
-		var e ingeststage.IngestedEvent
-		if err := json.Unmarshal(m.Data(), &e); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		e := unwrap[ingeststage.IngestedEvent](t, m.Data())
 		events[e.CorrelationID] = e.DMARCPass
 		_ = m.Ack()
 	}

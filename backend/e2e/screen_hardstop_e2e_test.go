@@ -81,10 +81,7 @@ func TestE2EScreenHardstopRoutesToHuman(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected a human-routed message: %v", err)
 	}
-	var e screenstage.ScreenedEvent
-	if err := json.Unmarshal(m.Data(), &e); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	e := unwrap[screenstage.ScreenedEvent](t, m.Data())
 	if e.CorrelationID != "legal" {
 		t.Fatalf("human message corr = %q, want legal", e.CorrelationID)
 	}
