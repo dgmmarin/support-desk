@@ -61,8 +61,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0029](ISSUE-0029-composite-confidence.md) | Composite confidence (ADR-0003) — calibrated G05 input | done | M6 | M | 0018, 0028 |
 | [0030](ISSUE-0030-full-pipeline-wiring.md) | Full pipeline wiring — decision spine end to end + replay safety | done | — | M | 0024–0029 |
 | [0031](ISSUE-0031-observe-stage.md) | Stage 10 (Observe) — immutable per-stage telemetry spanning the correlation id | done | — | M | 0030 |
+| [0032](ISSUE-0032-m10-analytics-read-plane.md) | M10 analytics read/aggregate plane (foundation) + operational & automation aggregation | done | M10 | M | 0031 |
 
-**Next id:** 0032
+**Next id:** 0033
 
 ## Conventions
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"tourdesk/internal/analytics"
 	"tourdesk/internal/bus"
 	"tourdesk/internal/clog"
 	"tourdesk/internal/config"
@@ -20,11 +21,12 @@ import (
 
 // Server is a running backend instance.
 type Server struct {
-	log  *slog.Logger
-	db   *store.DB
-	bus  *bus.Bus
-	http *http.Server
-	ln   net.Listener
+	log   *slog.Logger
+	db    *store.DB
+	appDB *store.DB // non-superuser, RLS-bound pool for tenant-scoped read APIs (M10)
+	bus   *bus.Bus
+	http  *http.Server
+	ln    net.Listener
 }
 
 // Start connects to Postgres and NATS, asserts the required PG extensions are
@@ -46,6 +48,15 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 		return nil, err
 	}
 
+	// Separate non-superuser pool for tenant-scoped read APIs (M10): a superuser
+	// connection bypasses RLS, so the analytics plane must not use the migration pool.
+	appDB, err := store.Connect(ctx, cfg.AppDatabaseURL)
+	if err != nil {
+		b.Close()
+		db.Close()
+		return nil, err
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", health.Handler{
 		Timeout: 3 * time.Second,
@@ -54,9 +65,12 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 			health.CheckerFunc{N: "nats", F: b.Health},
 		},
 	})
+	// M10 read plane (read-only, tenant-scoped): /analytics/operational, /analytics/automation.
+	mux.Handle("/analytics/", analytics.Handler{DB: appDB})
 
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
+		appDB.Close()
 		b.Close()
 		db.Close()
 		return nil, err
@@ -68,7 +82,7 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 
-	s := &Server{log: logger, db: db, bus: b, http: hs, ln: ln}
+	s := &Server{log: logger, db: db, appDB: appDB, bus: b, http: hs, ln: ln}
 	go func() {
 		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("http server stopped", "err", err)
@@ -90,6 +104,7 @@ func (s *Server) Bus() *bus.Bus { return s.bus }
 func (s *Server) Close(ctx context.Context) error {
 	err := s.http.Shutdown(ctx)
 	s.bus.Close()
+	s.appDB.Close()
 	s.db.Close()
 	return err
 }
