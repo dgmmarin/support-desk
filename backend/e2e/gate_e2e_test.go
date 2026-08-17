@@ -5,6 +5,8 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"tourdesk/internal/config"
 	"tourdesk/internal/gate"
 	"tourdesk/internal/gatestage"
+	"tourdesk/internal/pipeline"
 )
 
 // e2e_gate_routes_case_to_correct_queue (ISSUE-0002, mandatory E2E).
@@ -52,7 +55,8 @@ func TestE2EGateRoutesCaseToCorrectQueue(t *testing.T) {
 	defer js.DeleteStream(ctx, outStream)
 	defer js.DeleteStream(ctx, inStream)
 
-	stop, err := gatestage.Serve(ctx, js, inStream, inSubject, outBase)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	stop, err := gatestage.Serve(ctx, js, logger, inStream, inSubject, outBase)
 	if err != nil {
 		t.Fatalf("serve gate stage: %v", err)
 	}
@@ -70,11 +74,21 @@ func TestE2EGateRoutesCaseToCorrectQueue(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		data, err := json.Marshal(c.in)
+		payload, err := json.Marshal(c.in)
 		if err != nil {
-			t.Fatalf("%s: marshal: %v", c.name, err)
+			t.Fatalf("%s: marshal input: %v", c.name, err)
 		}
-		if _, err := js.Publish(ctx, inSubject, data); err != nil {
+		// Distinct conversation id per case → distinct idempotency key, so the
+		// shared output stream does not de-duplicate the three results.
+		env, err := json.Marshal(pipeline.Envelope{
+			CorrelationID:  c.name,
+			ConversationID: c.name,
+			Payload:        payload,
+		})
+		if err != nil {
+			t.Fatalf("%s: marshal envelope: %v", c.name, err)
+		}
+		if _, err := js.Publish(ctx, inSubject, env); err != nil {
 			t.Fatalf("%s: publish: %v", c.name, err)
 		}
 	}

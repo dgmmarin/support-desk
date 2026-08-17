@@ -33,8 +33,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0001](ISSUE-0001-backend-scaffold.md) | Backend scaffold: Go module, config, NATS + Postgres wiring | done | — | M | — |
 | [0002](ISSUE-0002-autonomy-gate.md) | Deterministic autonomy gate (pure function + tests) | done | M6 | M | 0001 |
 | [0003](ISSUE-0003-tenant-isolation-harness.md) | Tenant-isolation test harness + RLS baseline | done | M11 | M | 0001 |
+| [0004](ISSUE-0004-pipeline-stage-runner.md) | Pipeline stage runner (fail-closed, idempotent, quarantine) | done | — | M | 0001, 0002 |
 
-**Next id:** 0004
+**Next id:** 0005
 
 ## Conventions
 

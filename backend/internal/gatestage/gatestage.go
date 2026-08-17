@@ -1,18 +1,19 @@
-// Package gatestage is the transport glue that runs the deterministic gate
-// (stage 8) over NATS/JetStream: it consumes assembled cases from the gate input
-// stream, evaluates them with the pure gate.Evaluate, and publishes the routed
-// result to a subject derived from the outcome. The decision itself stays pure
-// (SR-M6-01); only the hand-off lives here (pipeline §3).
+// Package gatestage runs the deterministic gate (stage 8) as a pipeline stage.
+// The decision stays pure (gate.Evaluate, SR-M6-01); this package is a thin
+// adapter that plugs the gate into the reusable stage runner (pipeline §3): the
+// runner owns correlation ids, idempotent hand-off, quarantine and fail-closed
+// routing, so here we only decode → evaluate → choose the output subject.
 package gatestage
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"log/slog"
 
 	"github.com/nats-io/nats.go/jetstream"
 
 	"tourdesk/internal/gate"
+	"tourdesk/internal/pipeline"
 )
 
 // OutSubject maps a gate result to its output subject under base.
@@ -27,45 +28,24 @@ func OutSubject(base string, r gate.Result) string {
 	}
 }
 
-// Serve starts a durable consumer on inSubject, evaluates each message and
-// publishes the result to the routed output subject. It returns a stop function.
-// Poison messages (undecodable input) are terminated, never auto-sent.
-func Serve(ctx context.Context, js jetstream.JetStream, inStream, inSubject, outBase string) (stop func(), err error) {
-	stream, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
-		Name:     inStream,
-		Subjects: []string{inSubject},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("gatestage: stream: %w", err)
-	}
-	cons, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Durable:   "gate-stage",
-		AckPolicy: jetstream.AckExplicitPolicy,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("gatestage: consumer: %w", err)
-	}
-
-	cc, err := cons.Consume(func(msg jetstream.Msg) {
+// Serve runs the gate stage: it consumes enveloped gate.Input from inSubject and
+// publishes the routed gate.Result under outBase (`.send` / `.queue` /
+// `.specialist`). Fail-closed cases go to `<outBase>.queue`, poison to
+// `<outBase>.quarantine`.
+func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, inStream, inSubject, outBase string) (stop func(), err error) {
+	return pipeline.Run(ctx, js, logger, pipeline.Config{
+		Name:              "gate",
+		Stream:            inStream,
+		Subject:           inSubject,
+		Durable:           "gate-stage",
+		HumanSubject:      outBase + ".queue",
+		QuarantineSubject: outBase + ".quarantine",
+	}, func(_ context.Context, env pipeline.Envelope) (pipeline.Decision, error) {
 		var in gate.Input
-		if err := json.Unmarshal(msg.Data(), &in); err != nil {
-			_ = msg.Term() // poison: cannot evaluate → drop, never send
-			return
+		if err := json.Unmarshal(env.Payload, &in); err != nil {
+			return pipeline.Decision{}, err // fail closed → human queue
 		}
 		res := gate.Evaluate(in)
-		out, err := json.Marshal(res)
-		if err != nil {
-			_ = msg.Nak()
-			return
-		}
-		if _, err := js.Publish(ctx, OutSubject(outBase, res), out); err != nil {
-			_ = msg.Nak() // redeliver; hand-off is at-least-once (NFR-S-04)
-			return
-		}
-		_ = msg.Ack()
+		return pipeline.Decision{Subject: OutSubject(outBase, res), Payload: res}, nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("gatestage: consume: %w", err)
-	}
-	return cc.Stop, nil
 }
