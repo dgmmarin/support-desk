@@ -58,6 +58,17 @@ func TestCleanCustomerMailProceeds(t *testing.T) {
 	}
 }
 
+// test_hardstop_forces_human_in_screen
+func TestHardstopForcesHumanInScreen(t *testing.T) {
+	r := Screen(Input{Text: "I have contacted my lawyer and will take legal action."})
+	if r.Action != ForceHuman {
+		t.Fatalf("hard-stop action = %s, want force_human", r.Action)
+	}
+	if len(r.HardStops) == 0 {
+		t.Fatal("expected hard-stop categories to be reported")
+	}
+}
+
 // Injection takes priority over filing (an automated message that is also an
 // injection attempt must go to a human, not be filed).
 func TestInjectionBeatsFiling(t *testing.T) {

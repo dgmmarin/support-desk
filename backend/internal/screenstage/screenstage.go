@@ -20,6 +20,7 @@ type ScreenedEvent struct {
 	CorrelationID     string        `json:"correlation_id"`
 	Action            screen.Action `json:"action"`
 	InjectionDetected bool          `json:"injection_detected"`
+	HardStops         []string      `json:"hard_stops,omitempty"`
 	DMARCPass         bool          `json:"dmarc_pass"`
 	Reasons           []string      `json:"reasons,omitempty"`
 }
@@ -44,6 +45,7 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, inS
 			CorrelationID:     env.CorrelationID,
 			Action:            res.Action,
 			InjectionDetected: res.InjectionDetected,
+			HardStops:         res.HardStops,
 			DMARCPass:         in.DMARCPass,
 			Reasons:           res.Reasons,
 		}

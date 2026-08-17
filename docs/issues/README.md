@@ -43,8 +43,9 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0011](ISSUE-0011-screen-stage.md) | Screen stage (stage 2) — injection + out-of-scope screening | done | M3 | M | 0004 |
 | [0012](ISSUE-0012-draft-sentmessage-persistence.md) | Draft + SentMessage persistence (RLS + immutability) | done | — | M | 0007 |
 | [0013](ISSUE-0013-audit-inv5-reconstruction.md) | AuditRecord + INV-5 reconstruction of the send chain | done | M13 | M | 0008, 0012 |
+| [0014](ISSUE-0014-hardstop-detection.md) | Hard-stop detection in Screen stage (M3 → G04) | done | M3 | M | 0011 |
 
-**Next id:** 0014
+**Next id:** 0015
 
 ## Conventions
 

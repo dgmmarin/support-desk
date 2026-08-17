@@ -5,7 +5,11 @@
 // any generation and fails to force-human.
 package screen
 
-import "regexp"
+import (
+	"regexp"
+
+	"tourdesk/internal/hardstop"
+)
 
 // Action is the screen decision.
 type Action string
@@ -29,6 +33,7 @@ type Input struct {
 type Result struct {
 	Action            Action
 	InjectionDetected bool
+	HardStops         []string // hard-stop categories (feeds gate G04)
 	Reasons           []string
 }
 
@@ -52,6 +57,9 @@ func Screen(in Input) Result {
 	if ev := detectInjection(in.Text); ev != "" {
 		return Result{Action: ForceHuman, InjectionDetected: true, Reasons: []string{"prompt injection suspected: " + ev}}
 	}
+	if cats := hardstop.Detect(in.Text); len(cats) > 0 {
+		return Result{Action: ForceHuman, HardStops: cats, Reasons: []string{"hard-stop: " + joinCats(cats)}}
+	}
 	if in.Bounce {
 		return Result{Action: File, Reasons: []string{"bounce/DSN — no customer reply"}}
 	}
@@ -59,6 +67,17 @@ func Screen(in Input) Result {
 		return Result{Action: File, Reasons: []string{"automated/bulk mail — out of scope for a reply"}}
 	}
 	return Result{Action: Proceed}
+}
+
+func joinCats(cats []string) string {
+	out := ""
+	for i, c := range cats {
+		if i > 0 {
+			out += ", "
+		}
+		out += c
+	}
+	return out
 }
 
 // detectInjection returns the first matched snippet, or "" if none.
