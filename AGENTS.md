@@ -25,17 +25,26 @@ deliberate, surfaced change.
 
 ## How to work here
 
-1. **Read the governing spec + its linked ADRs before writing any code.** Guessing the contract is the
+1. **Open or locate the issue first.** All spec/plan work is tracked in [`docs/issues/`](docs/issues/) —
+   one file per shippable slice, from [`TEMPLATE.md`](docs/issues/TEMPLATE.md). Create it (or find it),
+   set `status: in-progress`, and keep its **Log** current. Nothing non-trivial gets built without an
+   issue. See [docs/issues/README.md](docs/issues/README.md).
+2. **Read the governing spec + its linked ADRs before writing any code.** Guessing the contract is the
    main failure mode. Grep the PRD for the relevant `FR-` ids.
-2. **Test-first (red → green → refactor).** Write a failing test named for its requirement id
+3. **Test-first (red → green → refactor).** Write a failing test named for its requirement id
    (e.g. `test_FR_M6_02_...`) — including the **fail-closed path** — before implementation code. Trivial
    one-liners excepted; anything with logic gets a test.
-3. **Minimum code to pass.** Lazy in the senior sense: reuse stdlib/platform/existing deps, delete over
+4. **Every issue has a mandatory E2E test.** One end-to-end test that drives the slice through its real
+   boundary — the running services (compose) and real NATS/Postgres/HTTP transport, no mocks at the seam.
+   The issue is not `done` until that E2E test is green.
+5. **Minimum code to pass.** Lazy in the senior sense: reuse stdlib/platform/existing deps, delete over
    add, no unrequested abstractions. Never lazy about the invariants below, trust-boundary validation,
    error handling that prevents data loss, security, or accessibility.
-4. **Verify with real output** before claiming done — paste the test run; never assert "passing" unseen.
-5. **Trace every change** to the `FR-`/`SR-`/`NFR-`/`SEC-`/`LEG-` id it satisfies. No governing id ⇒ you
-   may be adding scope; stop and ask.
+6. **Verify with real output** before claiming done — paste the test run; never assert "passing" unseen.
+7. **Trace every change** to the `FR-`/`SR-`/`NFR-`/`SEC-`/`LEG-` id and the `ISSUE-NNNN` it satisfies —
+   reference the issue id in the commit message. No governing id ⇒ you may be adding scope; stop and ask.
+8. **Update the issue and the board.** On completion, tick the acceptance criteria, record the evidence in
+   the Log, set `status: done`, and update the board in `docs/issues/README.md`.
 
 ## Non-negotiable invariants
 

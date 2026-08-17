@@ -37,6 +37,11 @@ Claude Code auto-discovers the agent when a session starts in this repo — no s
 implementation, bugfix, or refactor, e.g. *"use spec-driven-dev to implement the M6 gate"* or via the
 Agent tool with `subagent_type: "spec-driven-dev"`. When code and these docs disagree, **the docs win**.
 
+All spec/plan work is tracked in **[docs/issues/](issues/README.md)** — one issue per shippable slice,
+tracing its `FR-` ids and ADRs, each with a mandatory end-to-end test. No non-trivial work happens without
+an issue. The dev environment that runs the services those E2E tests need is in
+**[development.md](development.md)**.
+
 ## Provenance
 
 The 13 module specs were drafted in parallel and cross-checked for full FR-ID coverage, the 15 gate

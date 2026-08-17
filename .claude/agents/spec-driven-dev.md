@@ -26,18 +26,21 @@ or the docs need a deliberate change (raise it, don't silently diverge).
 
 1. **Read before you write.** Never implement a behaviour before reading its governing spec and the
    ADRs that spec links. Guessing the contract is the primary failure mode here.
-2. **Test-first, always.** Red → green → refactor. No implementation code before a failing test that
-   pins the behaviour to its requirement id. (Trivial one-liners excepted, per the repo's lazy-senior
-   ethos — but anything with logic gets a test.)
-3. **Trace everything.** Every change cites the `FR-Mx-yy` / `SR-Mx-yy` / `NFR-` / `SEC-` / `LEG-` id
-   it satisfies, in the test name or a comment. If no id governs it, you may be adding unrequested
-   scope — stop and ask.
-4. **Fail closed.** On error, missing dependency, or insufficient evidence, route to a human / abstain
+2. **Track it as an issue.** All spec/plan work lives in `docs/issues/` — create/locate the `ISSUE-NNNN`
+   before building, keep it live, close it when done, reference it in the commit. No issue, no work.
+3. **Test-first, always, plus a mandatory E2E.** Red → green → refactor for unit-level logic; and **every
+   issue also ships one end-to-end test** through the real boundary (running services, real transport, no
+   mocks at the seam). No implementation code before a failing test that pins behaviour to its id.
+   (Trivial one-liners excepted — but anything with logic gets a test.)
+4. **Trace everything.** Every change cites the `FR-Mx-yy` / `SR-Mx-yy` / `NFR-` / `SEC-` / `LEG-` id and
+   the `ISSUE-NNNN` it satisfies, in the test name, a comment, or the commit. If no id governs it, you may
+   be adding unrequested scope — stop and ask.
+5. **Fail closed.** On error, missing dependency, or insufficient evidence, route to a human / abstain
    / quarantine — **never auto-send, never guess**. Every module spec states its fail-closed behaviour;
    honour it.
-5. **The invariants in §3 are non-negotiable.** They are safety, legal, and existential-security
+6. **The invariants in §3 are non-negotiable.** They are safety, legal, and existential-security
    controls. Code that weakens one is wrong even if a test passes.
-6. **Be lazy in the senior sense.** Least code that satisfies the spec. Reuse stdlib/platform/existing
+7. **Be lazy in the senior sense.** Least code that satisfies the spec. Reuse stdlib/platform/existing
    deps before writing new. Delete over add. But never lazy about the invariants, input validation at
    trust boundaries, error handling that prevents data loss, security, or accessibility.
 
@@ -77,29 +80,39 @@ Read the real files — this map tells you *where*, the files tell you *what*. P
 | Compliance, disclosure, complaints, DSAR, retention, PII | `M13` | 0018, 0024 |
 | Pipeline & gate spine | `pipeline.md` | 0001, 0002, 0010 |
 | Shared entities & isolation | `data-model.md` | 0015 |
+| **Development tracker** | `docs/issues/` (`README.md`, `TEMPLATE.md`, `ISSUE-NNNN-*.md`) | — |
 
 ## 2. The workflow (follow it every time)
 
 Create a todo list from these steps for any non-trivial task.
 
-1. **Locate the contract.** Identify which module(s)/spec(s) govern the task using the index above.
+1. **Open or locate the issue.** All spec/plan work is tracked in `docs/issues/`. Create the issue from
+   `docs/issues/TEMPLATE.md` (or find the existing one), set `status: in-progress`, and keep its **Log**
+   updated as you go. No non-trivial work happens without an issue. Read `docs/issues/README.md` for the
+   convention and update the board there.
+2. **Locate the contract.** Identify which module(s)/spec(s) govern the task using the index above.
    Read the governing spec end-to-end and the ADRs it links. Grep the PRD for the relevant `FR-` ids.
-2. **Extract the testable requirements.** List the exact `FR-`/`SR-` ids in scope and, for each, its
+3. **Extract the testable requirements.** List the exact `FR-`/`SR-` ids in scope and, for each, its
    priority, its expected behaviour, and its **fail-closed behaviour**. Note the invariants (§3) that
-   apply.
-3. **Confirm scope.** If the task implies behaviour with no governing requirement, or depends on a
+   apply. Write them into the issue's acceptance criteria.
+4. **Confirm scope.** If the task implies behaviour with no governing requirement, or depends on a
    *provisional* ADR (0019–0029) or an open decision (OD-*), surface it before coding — don't invent
    the resolution.
-4. **Red — write the failing test(s) first.** One test per requirement/branch, named for its id
+5. **Red — write the failing test(s) first.** One test per requirement/branch, named for its id
    (e.g. `test_FR_M6_02_any_single_failing_condition_blocks_auto_send`). Include the fail-closed path
    and the edge cases the spec calls out. Run it; watch it fail for the right reason.
-5. **Green — minimum code to pass.** No abstractions nobody asked for. Keep model calls behind the
+6. **Green — minimum code to pass.** No abstractions nobody asked for. Keep model calls behind the
    provider interface (ADR-0010); keep the send decision deterministic (ADR-0001).
-6. **Refactor** with tests green. Match surrounding code's idiom, naming, and comment density.
-7. **Verify — evidence, not assertion.** Run the tests and any spec-mandated self-check; paste real
-   output. Never claim "passing" without showing it. Use `superpowers:verification-before-completion`.
-8. **Trace & report.** State which `FR-`/`SR-` ids are now covered, which remain, and any invariant
-   you touched. Note any doc mismatch you found.
+7. **Mandatory E2E test.** Every issue ships one end-to-end test that drives the slice through its real
+   boundary — the running services (`mise run up`) and real NATS/Postgres/HTTP transport, no mocks at the
+   seam — asserting an observable outcome. The issue is not `done` until this is green.
+8. **Refactor** with tests green. Match surrounding code's idiom, naming, and comment density.
+9. **Verify — evidence, not assertion.** Run the unit tests, the E2E test, and any spec-mandated
+   self-check; paste real output. Never claim "passing" without showing it. Use
+   `superpowers:verification-before-completion`.
+10. **Close the issue & report.** Tick the acceptance criteria, record evidence in the issue Log, set
+    `status: done`, update the board in `docs/issues/README.md`, and reference `ISSUE-NNNN` in the commit.
+    State which `FR-`/`SR-` ids are now covered, which remain, and any doc mismatch you found.
 
 If you hit a bug or unexpected behaviour, switch to `superpowers:systematic-debugging` — find root
 cause before proposing a fix. Do not paper over failing tests.
@@ -150,6 +163,10 @@ These hold across every module. Violating one is a defect regardless of green te
 
 ## 4. TDD specifics for this project
 
+- **Mandatory E2E per issue.** Beyond unit tests, every issue ships one end-to-end test that drives the
+  slice through the **running services** (`mise run up`: Postgres, NATS/JetStream, Tika, ClamAV) over real
+  transport — no mocks at the seam. It asserts an observable outcome (a row written, a message delivered to
+  the expected subject, an HTTP response). The issue is not `done` until it is green.
 - **Test the fail-closed path, not just the happy path.** For each requirement, the spec's "fail-closed
   behaviour" column is a test case. A module with only happy-path tests is unfinished.
 - **The gate (M6) is a pure function** — unit-test it directly and exhaustively: property-style,
