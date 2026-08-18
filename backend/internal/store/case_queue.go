@@ -31,6 +31,12 @@ type CaseRow struct {
 	ClaimedBy      string
 	ClaimedAt      *time.Time
 	LockExpiresAt  *time.Time
+	// Escalation routing (FR-M7-10): which console work-pool holds the case and,
+	// when escalated, who moved it and why. Default queue is 'general'.
+	Queue            string
+	EscalationReason string
+	EscalatedBy      string
+	EscalatedAt      *time.Time
 }
 
 // Locked reports whether the case is held by a live (non-idle) lock at now. A claimed case
@@ -81,16 +87,20 @@ func EnqueueCase(ctx context.Context, tx pgx.Tx, in CaseInput) (bool, error) {
 
 // ListPendingCases returns the active tenant's live queue — every case not yet resolved
 // (pending or claimed), so the console can show in-progress locks alongside claimable work.
-// require_tenant() forces a scopeless query to FAIL rather than silently return empty
-// (ADR-0015, mirrors the M10 read plane): a missing scope is an error, never a false empty.
-func ListPendingCases(ctx context.Context, tx pgx.Tx) ([]CaseRow, error) {
+// queue filters to one console work-pool (e.g. "general" or "specialist"); "" returns every
+// pool (FR-M7-10). require_tenant() forces a scopeless query to FAIL rather than silently
+// return empty (ADR-0015, mirrors the M10 read plane): a missing scope is an error, never a
+// false empty.
+func ListPendingCases(ctx context.Context, tx pgx.Tx, queue string) ([]CaseRow, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT conversation_id, risk_class, intent, channel, sentiment, urgency,
 		       departure_at, enqueued_at, status,
-		       coalesce(claimed_by,''), claimed_at, lock_expires_at
+		       coalesce(claimed_by,''), claimed_at, lock_expires_at,
+		       queue, coalesce(escalation_reason,''), coalesce(escalated_by,''), escalated_at
 		FROM case_queue, (SELECT require_tenant()) g
 		WHERE status <> 'resolved'
-		ORDER BY enqueued_at`)
+		  AND ($1 = '' OR queue = $1)
+		ORDER BY enqueued_at`, queue)
 	if err != nil {
 		return nil, fmt.Errorf("store: list pending cases: %w", err)
 	}
@@ -100,7 +110,8 @@ func ListPendingCases(ctx context.Context, tx pgx.Tx) ([]CaseRow, error) {
 		var c CaseRow
 		if err := rows.Scan(&c.ConversationID, &c.RiskClass, &c.Intent, &c.Channel,
 			&c.Sentiment, &c.Urgency, &c.DepartureAt, &c.EnqueuedAt, &c.Status,
-			&c.ClaimedBy, &c.ClaimedAt, &c.LockExpiresAt); err != nil {
+			&c.ClaimedBy, &c.ClaimedAt, &c.LockExpiresAt,
+			&c.Queue, &c.EscalationReason, &c.EscalatedBy, &c.EscalatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan case: %w", err)
 		}
 		out = append(out, c)
@@ -176,6 +187,32 @@ func ResolveCase(ctx context.Context, tx pgx.Tx, conversationID, agent string, n
 		conversationID, agent, now)
 	if err != nil {
 		return false, fmt.Errorf("store: resolve case: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// EscalateCase moves a case to a target console work-pool (the specialist/senior queue — the
+// gate's G04 target, pipeline.md §4) with a reason, preserving context (FR-M7-10). The
+// accumulated internal notes stay attached to the same conversation, so re-routing carries the
+// context without copying it. Escalation releases the lock and returns the case to 'pending' so
+// the receiving team can claim it fresh. A resolved case is not escalatable (stays resolved).
+// Returns whether the transition applied.
+//
+// Reusing the queue's own routing (not a parallel path) keeps one source of truth for where a
+// case lives; the gate routes hard-stops here at send time, an agent routes here by hand.
+func EscalateCase(ctx context.Context, tx pgx.Tx, conversationID, byAgent, targetQueue, reason string, now time.Time) (bool, error) {
+	if conversationID == "" || targetQueue == "" {
+		return false, fmt.Errorf("store: escalate case requires a conversation id and a target queue")
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE case_queue
+		SET queue = $2, escalation_reason = $3, escalated_by = $4, escalated_at = $5,
+		    status = 'pending', claimed_by = NULL, claimed_at = NULL, lock_expires_at = NULL
+		WHERE conversation_id = $1
+		  AND status <> 'resolved'`,
+		conversationID, targetQueue, nullIfEmpty(reason), nullIfEmpty(byAgent), now)
+	if err != nil {
+		return false, fmt.Errorf("store: escalate case: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }

@@ -62,6 +62,8 @@ type QueueItem struct {
 	EnqueuedAt     time.Time  `json:"enqueued_at"`
 	DepartureAt    *time.Time `json:"departure_at,omitempty"`
 	SLA            SLAStatus  `json:"sla"`
+	Status         string     `json:"status"`          // pending | claimed (FR-M7-14 filter dimension)
+	Queue          string     `json:"queue"`           // console work-pool (FR-M7-10)
 	Locked         bool       `json:"locked"`
 	ClaimedBy      string     `json:"claimed_by,omitempty"`
 }
@@ -201,6 +203,8 @@ func Build(rows []store.CaseRow, cfg store.SLAConfig, w Weights, now time.Time) 
 			EnqueuedAt:     r.EnqueuedAt,
 			DepartureAt:    r.DepartureAt,
 			SLA:            sla,
+			Status:         r.Status,
+			Queue:          r.Queue,
 			Locked:         r.Locked(now),
 			ClaimedBy:      r.ClaimedBy,
 		})

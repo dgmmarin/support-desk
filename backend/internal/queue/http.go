@@ -70,6 +70,20 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveClaim(w, r, tenant)
 	case kind == "resolve" && r.Method == http.MethodPost:
 		h.serveResolve(w, r, tenant)
+	case kind == "search" && r.Method == http.MethodGet:
+		h.serveSearch(w, r, tenant) // FR-M7-13
+	case kind == "escalate" && r.Method == http.MethodPost:
+		h.serveEscalate(w, r, tenant) // FR-M7-10
+	case kind == "notes" && r.Method == http.MethodGet:
+		h.serveListNotes(w, r, tenant) // FR-M7-09
+	case kind == "notes" && r.Method == http.MethodPost:
+		h.serveAddNote(w, r, tenant) // FR-M7-09
+	case kind == "views" && r.Method == http.MethodGet:
+		h.serveListViews(w, r, tenant) // FR-M7-14
+	case kind == "views" && r.Method == http.MethodPost:
+		h.serveSaveView(w, r, tenant) // FR-M7-14
+	case kind == "view" && r.Method == http.MethodGet:
+		h.serveRunView(w, r, tenant) // FR-M7-14 re-run
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -79,9 +93,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // tenant config (ISSUE-0037 sla section); undefined ⇒ no timer, not a breach (FR-M7-12).
 func (h Handler) serveQueue(w http.ResponseWriter, r *http.Request, tenant string) {
 	now := h.now()
+	queue := r.URL.Query().Get("queue") // "" = every work-pool (FR-M7-10)
 	var items []QueueItem
 	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
-		rows, e := store.ListPendingCases(r.Context(), tx)
+		rows, e := store.ListPendingCases(r.Context(), tx, queue)
 		if e != nil {
 			return e
 		}
@@ -99,6 +114,237 @@ func (h Handler) serveQueue(w http.ResponseWriter, r *http.Request, tenant strin
 	writeJSON(w, http.StatusOK, struct {
 		Items []QueueItem `json:"items"`
 	}{Items: items})
+}
+
+// serveSearch runs a BM25 full-text search over the tenant's case content (FR-M7-13). The
+// query is required; results are tenant-scoped by RLS (a cross-tenant match is impossible).
+func (h Handler) serveSearch(w http.ResponseWriter, r *http.Request, tenant string) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "q required", http.StatusBadRequest)
+		return
+	}
+	var hits []store.CaseSearchHit
+	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		hits, e = store.SearchCases(r.Context(), tx, q, 0)
+		return e
+	})
+	if err != nil {
+		http.Error(w, "search failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Hits []store.CaseSearchHit `json:"hits"`
+	}{Hits: hits})
+}
+
+// serveEscalate moves a case to a target (specialist/senior) work-pool with a reason,
+// preserving its attached context (FR-M7-10). The target queue and conversation are required.
+func (h Handler) serveEscalate(w http.ResponseWriter, r *http.Request, tenant string) {
+	var req struct {
+		ConversationID string `json:"conversation_id"`
+		Agent          string `json:"agent"`
+		TargetQueue    string `json:"target_queue"`
+		Reason         string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ConversationID == "" || req.TargetQueue == "" {
+		http.Error(w, "conversation_id and target_queue required", http.StatusBadRequest)
+		return
+	}
+	var applied bool
+	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		applied, e = store.EscalateCase(r.Context(), tx, req.ConversationID, req.Agent, req.TargetQueue, req.Reason, h.now())
+		return e
+	})
+	if err != nil {
+		http.Error(w, "escalate failed", http.StatusInternalServerError)
+		return
+	}
+	if !applied {
+		http.Error(w, "case not escalatable", http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Escalated   bool   `json:"escalated"`
+		TargetQueue string `json:"target_queue"`
+	}{Escalated: true, TargetQueue: req.TargetQueue})
+}
+
+// serveAddNote appends an internal note (with @mentions) to a case (FR-M7-09). Internal text
+// lives in its own table the send path never reads (G14), so it can never reach a customer.
+func (h Handler) serveAddNote(w http.ResponseWriter, r *http.Request, tenant string) {
+	var req struct {
+		ConversationID string `json:"conversation_id"`
+		Author         string `json:"author"`
+		Body           string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ConversationID == "" || req.Author == "" || req.Body == "" {
+		http.Error(w, "conversation_id, author and body required", http.StatusBadRequest)
+		return
+	}
+	var noteID string
+	var mentions []string
+	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		noteID, mentions, e = store.AddCaseNote(r.Context(), tx, req.ConversationID, req.Author, req.Body)
+		return e
+	})
+	if err != nil {
+		http.Error(w, "add note failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		ID       string   `json:"id"`
+		Mentions []string `json:"mentions"`
+	}{ID: noteID, Mentions: mentions})
+}
+
+// serveListNotes lists a case's internal notes with their recorded mentions (FR-M7-09).
+func (h Handler) serveListNotes(w http.ResponseWriter, r *http.Request, tenant string) {
+	convID := r.URL.Query().Get("conversation_id")
+	if convID == "" {
+		http.Error(w, "conversation_id required", http.StatusBadRequest)
+		return
+	}
+	var notes []store.CaseNote
+	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		notes, e = store.ListCaseNotes(r.Context(), tx, convID)
+		return e
+	})
+	if err != nil {
+		http.Error(w, "list notes failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Notes []store.CaseNote `json:"notes"`
+	}{Notes: notes})
+}
+
+// serveSaveView persists an agent's named filter set (FR-M7-14).
+func (h Handler) serveSaveView(w http.ResponseWriter, r *http.Request, tenant string) {
+	var req struct {
+		Agent   string            `json:"agent"`
+		Name    string            `json:"name"`
+		Filters store.CaseFilters `json:"filters"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Agent == "" || req.Name == "" {
+		http.Error(w, "agent and name required", http.StatusBadRequest)
+		return
+	}
+	var id string
+	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		id, e = store.SaveView(r.Context(), tx, req.Agent, req.Name, req.Filters)
+		return e
+	})
+	if err != nil {
+		http.Error(w, "save view failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		ID string `json:"id"`
+	}{ID: id})
+}
+
+// serveListViews lists an agent's saved views (FR-M7-14).
+func (h Handler) serveListViews(w http.ResponseWriter, r *http.Request, tenant string) {
+	agent := r.URL.Query().Get("agent")
+	if agent == "" {
+		http.Error(w, "agent required", http.StatusBadRequest)
+		return
+	}
+	var views []store.SavedView
+	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		views, e = store.ListSavedViews(r.Context(), tx, agent)
+		return e
+	})
+	if err != nil {
+		http.Error(w, "list views failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Views []store.SavedView `json:"views"`
+	}{Views: views})
+}
+
+// serveRunView re-runs a saved view: it resolves the agent's named filter set and returns the
+// case queue narrowed to it (FR-M7-14). When the view carries a full-text query it is combined
+// with the filters (BM25 hits ∩ filtered queue). Same-input, same-output (deterministic order).
+func (h Handler) serveRunView(w http.ResponseWriter, r *http.Request, tenant string) {
+	agent := r.URL.Query().Get("agent")
+	name := r.URL.Query().Get("name")
+	if agent == "" || name == "" {
+		http.Error(w, "agent and name required", http.StatusBadRequest)
+		return
+	}
+	now := h.now()
+	var items []QueueItem
+	err := store.WithTenant(r.Context(), h.DB.Pool, tenant, func(tx pgx.Tx) error {
+		view, e := store.GetSavedView(r.Context(), tx, agent, name)
+		if e != nil {
+			return e
+		}
+		rows, e := store.ListPendingCases(r.Context(), tx, view.Filters.Queue)
+		if e != nil {
+			return e
+		}
+		sla, _, e := store.GetSLAConfig(r.Context(), tx)
+		if e != nil {
+			return e
+		}
+		var searchHits map[string]bool
+		if view.Filters.Query != "" {
+			hits, e := store.SearchCases(r.Context(), tx, view.Filters.Query, 0)
+			if e != nil {
+				return e
+			}
+			searchHits = map[string]bool{}
+			for _, hh := range hits {
+				searchHits[hh.ConversationID] = true
+			}
+		}
+		items = applyFilters(Build(rows, sla, h.weights(), now), view.Filters, searchHits)
+		return nil
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "saved view not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "run view failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []QueueItem `json:"items"`
+	}{Items: items})
+}
+
+// applyFilters narrows scored queue items to a saved view's filter set (FR-M7-14). Queue is
+// already applied at the SQL layer; intent/status/risk are applied here, and — when the view
+// carries a full-text query — membership in its BM25 hit set. A nil hit set means "no query"
+// (do not restrict); an empty non-nil set means "query matched nothing" (restrict to none).
+func applyFilters(items []QueueItem, f store.CaseFilters, searchHits map[string]bool) []QueueItem {
+	out := make([]QueueItem, 0, len(items))
+	for _, it := range items {
+		if f.Intent != "" && it.Intent != f.Intent {
+			continue
+		}
+		if f.Status != "" && it.Status != f.Status {
+			continue
+		}
+		if f.RiskClass != nil && it.RiskClass != *f.RiskClass {
+			continue
+		}
+		if searchHits != nil && !searchHits[it.ConversationID] {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // serveClaim claims a case for an agent (FR-M7-02). A live lock held by another agent yields

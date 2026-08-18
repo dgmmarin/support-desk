@@ -127,7 +127,7 @@ func TestFRM701QueueTenantIsolation(t *testing.T) {
 		var rows []store.CaseRow
 		if err := store.WithTenant(ctx, app.Pool, tenant, func(tx pgx.Tx) error {
 			var e error
-			rows, e = store.ListPendingCases(ctx, tx)
+			rows, e = store.ListPendingCases(ctx, tx, "")
 			return e
 		}); err != nil {
 			t.Fatalf("list (%s): %v", tenant, err)

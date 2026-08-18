@@ -85,7 +85,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0053](ISSUE-0053-m1-mail-provider.md) | MailProvider interface + IMAP/SMTP, MS Graph, Gmail providers (swappable, ≤60s to pipeline) | done | M1 | M | 0005, 0020, 0037 |
 | [0054](ISSUE-0054-m1-multimailbox-bounce.md) | Multi-mailbox / multi-identity routing + bounce hard/soft classification + onboarding deliverability validation | done | M1 | M | 0053, 0037 |
 | [0055](ISSUE-0055-m7-queue-claim-sla.md) | Case queue scoring service + claim/lock (idle-release) + SLA timers/breach | done | M7 | M | 0007, 0037 |
-| [0056](ISSUE-0056-m7-search-views-escalation-notes.md) | Case full-text search + saved views/filters + escalation-with-context + internal notes/@mentions | todo | M7 | M | 0055 |
+| [0056](ISSUE-0056-m7-search-views-escalation-notes.md) | Case full-text search + saved views/filters + escalation-with-context + internal notes/@mentions | done | M7 | M | 0055 |
 | [0057](ISSUE-0057-m7-review-booking-actions.md) | Review/evidence read API (three-pane data, inline-citation spans) + booking panel + translation view + autonomy indicator + case actions | todo | M7 | M | 0055, 0045, 0046 |
 | [0058](ISSUE-0058-m9-anomaly-detection.md) | Volume-anomaly detection (overall + per topic/destination) + surge semantic clustering | todo | M9 | M | 0031, 0050 |
 | [0059](ISSUE-0059-m9-event-workspace.md) | Event workspace + official position + cluster answer (personalized bulk) + automation freeze | todo | M9 | M | 0058, 0027, 0017 |
