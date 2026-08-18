@@ -39,6 +39,9 @@ export function makeClient(getSession: () => Session | null, fetchImpl: FetchImp
     getQueue: async (): Promise<QueueItem[]> =>
       (await call<{ items: QueueItem[] }>("GET", "/queue")).items ?? [],
 
+    // ponytail: `agent = "me"` is a placeholder identity — M11 wires the real
+    // agent id from the authenticated session; until then every claim/resolve
+    // call is attributed to a literal "me" unless a caller overrides it.
     claim: (conversationId: string, agent = "me"): Promise<ClaimResult> =>
       call<ClaimResult>("POST", "/queue/claim", { conversation_id: conversationId, agent }),
 

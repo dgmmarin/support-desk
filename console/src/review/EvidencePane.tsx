@@ -1,6 +1,6 @@
 import type { ReviewSurface } from "../api/types";
 export function EvidencePane({ surface }: { surface: ReviewSurface }) {
-  const { booking, autonomy, evidence } = surface;
+  const { booking, autonomy, evidence, inline_citations } = surface;
   return (
     <aside aria-label="evidence" style={{ overflow: "auto", display: "grid", gap: "var(--pane-gap)" }}>
       <section aria-label="autonomy">
@@ -21,6 +21,24 @@ export function EvidencePane({ surface }: { surface: ReviewSurface }) {
         <h3>Cited sources</h3>
         {evidence.length === 0 ? <p style={{ color: "var(--muted)" }}>none</p>
           : <ul>{evidence.map((s) => <li key={s.id}>{s.title ?? s.id}{s.url ? ` — ${s.url}` : ""}</li>)}</ul>}
+      </section>
+      {/* ponytail: plain claim -> source list, not in-textarea span highlighting —
+          the draft is a plain <textarea> (DraftEditor), which has no concept of
+          rich spans/ranges to anchor a highlight to. Wiring hover-highlight back
+          into the draft text needs a rich-text/contenteditable editor, which is a
+          later slice; this list is the agreed fidelity for now. */}
+      <section aria-label="citations">
+        <h3>Citations</h3>
+        {inline_citations.length === 0 ? <p style={{ color: "var(--muted)" }}>none</p>
+          : <ul>{inline_citations.map((c, i) => {
+              const target = c.knowledge_item_id ?? c.booking_field_path ?? "—";
+              return (
+                <li key={i}>
+                  “{c.claim_span}” → {target}
+                  {!c.resolved && <span style={{ color: "var(--warn)" }}> ⚠ unresolved</span>}
+                </li>
+              );
+            })}</ul>}
       </section>
     </aside>
   );

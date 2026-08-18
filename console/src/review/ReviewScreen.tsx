@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { ActionKind, ReviewSurface } from "../api/types";
+import { PermissionError } from "../api/client";
 import { ThreadPane } from "./ThreadPane";
 import { EvidencePane } from "./EvidencePane";
 import { DraftEditor } from "./DraftEditor";
@@ -10,8 +11,8 @@ export function ReviewScreen({ client, conversationId, agent, onDone }: { client
   const [surface, setSurface] = useState<ReviewSurface | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { client.getReview(conversationId).then(setSurface).catch(() => setError("could not load case")); }, [client, conversationId]);
-  if (error) return <p role="alert">{error}</p>;
-  if (!surface) return <p>Loading…</p>;
+  if (error) return (<div><p role="alert">{error}</p><button onClick={onDone}>Back to queue</button></div>);
+  if (!surface) return (<div><p>Loading…</p><button onClick={onDone}>Back to queue</button></div>);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: "var(--pane-gap)", height: "100%", position: "relative" }}>
       <ThreadPane customerMessage={surface.customer_message} thread={surface.thread} />
@@ -31,6 +32,7 @@ function DraftRegion({ client, surface, agent, onDone }: { client: ApiClient; su
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   async function act(action: ActionKind) {
+    if (action === "edit_send" && body.trim() === "") { setMsg("draft is empty"); return; }
     setBusy(true); setMsg(null);
     try {
       const r = await client.act({
@@ -42,7 +44,11 @@ function DraftRegion({ client, surface, agent, onDone }: { client: ApiClient; su
       setMsg(r.sent || r.already_sent ? "sent" : r.escalated ? "escalated" : r.rejected ? "rejected" : "done");
       onDone();
     } catch (e) {
-      setMsg(e instanceof Error && e.message.includes("503") ? "sending unavailable — escalate instead" : "action failed");
+      setMsg(
+        e instanceof PermissionError ? "insufficient role"
+        : e instanceof Error && e.message.includes("503") ? "sending unavailable — escalate instead"
+        : "action failed",
+      );
     } finally { setBusy(false); }
   }
   return (<div>
