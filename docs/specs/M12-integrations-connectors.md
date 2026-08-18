@@ -119,12 +119,12 @@ with a staleness note but the gate may not auto-send stale time-critical facts.
 
 ## 7. Verification
 
-- **Self-check (runnable):** `check_m12_conformance.py` — an assert-based conformance harness that, given
-  any connector object, asserts (a) it implements **every** interface method (introspect method set vs the
-  required ten), (b) each method returns facts stamped with `as_of` + `source`, and (c) **read-only**: run
-  each method against a fixture back-end and assert the fixture's mutation counter stays zero. A connector
-  missing a method or mutating state fails. One file, asserts only, no framework — this doubles as the
-  FR-M12-09 conformance suite seed.
+- **Self-check (runnable):** `internal/reservation/conformance_test.go` (Go — the implementation substrate;
+  ISSUE-0045) — an assert-based conformance harness that, given any connector object, asserts (a) it
+  implements **every** interface method (introspect method set vs the required ten), (b) each method returns
+  facts stamped with `as_of` + `source`, and (c) **read-only**: run each method against a fixture back-end
+  and assert the fixture snapshot is unchanged. A connector missing a method or mutating state fails. Asserts
+  only, no framework — this doubles as the FR-M12-09 conformance suite seed.
 - Unit: `NotSupported` from any method drives the caller to degraded/human, never to a guess; time-critical
   auto-send with only cached data is refused; a non-recorded-contact sender is denied booking data.
 - Eval-set hook: replay booking-intent cases with the connector disabled and assert every one routes to
