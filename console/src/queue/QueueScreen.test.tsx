@@ -14,8 +14,9 @@ function client(overrides = {}): any {
 }
 test("renders rows ordered by score with a breach badge", async () => {
   render(<QueueScreen client={client()} onOpen={() => {}} />);
-  const rows = await screen.findAllByRole("row");
-  expect(within(rows[1]).getByText("c1")).toBeInTheDocument();
+  await screen.findByText("c1");            // wait for the poll to populate data rows
+  const rows = screen.getAllByRole("row");  // header + 2 data rows now present
+  expect(within(rows[1]).getByText("c1")).toBeInTheDocument();   // highest score first
   expect(within(rows[1]).getByText(/breach/i)).toBeInTheDocument();
 });
 test("claim conflict shows a message and does not open", async () => {
