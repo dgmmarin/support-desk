@@ -13,3 +13,11 @@ test("clicking Escalate fires escalate", async () => {
   await userEvent.click(screen.getByRole("button", { name: /escalate/i }));
   expect(onAct).toHaveBeenCalledWith("escalate");
 });
+test("does not fire actions while typing in a textarea", async () => {
+  const onAct = vi.fn();
+  render(<div><textarea aria-label="draft reply" /><ActionBar onAct={onAct} busy={false} /></div>);
+  const ta = screen.getByLabelText("draft reply");
+  ta.focus();
+  await userEvent.type(ta, "approve");
+  expect(onAct).not.toHaveBeenCalled();
+});
