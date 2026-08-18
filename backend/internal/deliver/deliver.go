@@ -109,6 +109,22 @@ func (d *Deliver) Serve(ctx context.Context, js jetstream.JetStream, logger *slo
 			return pipeline.Decision{Subject: reviewSubject, Payload: in}, nil
 		}
 
+		// Fail-closed on hard-bounce suppression (FR-M1-07): a recipient flagged
+		// undeliverable by a prior hard bounce is never auto-sent to again — route to a
+		// human instead. A read error propagates (Nak) rather than sending blind.
+		var suppressed bool
+		if err := store.WithTenant(ctx, d.db.Pool, env.TenantID, func(tx pgx.Tx) error {
+			var e error
+			suppressed, e = store.IsSuppressed(ctx, tx, in.Recipient)
+			return e
+		}); err != nil {
+			return pipeline.Decision{}, fmt.Errorf("deliver: suppression check: %w", err)
+		}
+		if suppressed {
+			logger.Warn("deliver: recipient suppressed (hard bounce), routing to review", "correlation_id", env.CorrelationID)
+			return pipeline.Decision{Subject: reviewSubject, Payload: in}, nil
+		}
+
 		var sentID string
 		err := store.WithTenant(ctx, d.db.Pool, env.TenantID, func(tx pgx.Tx) error {
 			id, created, e := store.InsertSentMessageOnce(ctx, tx, store.SentMessage{

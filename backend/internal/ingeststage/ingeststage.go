@@ -38,11 +38,13 @@ type IngestedEvent struct {
 	Outcome          ingest.Outcome `json:"outcome"`
 	MessageID        string         `json:"message_id,omitempty"`
 	Subject          string         `json:"subject,omitempty"`
-	Automated        bool           `json:"automated"`
-	SuppressAutoSend bool           `json:"suppress_auto_send"`
-	DMARCPass        bool           `json:"dmarc_pass"`
-	DuplicateOf      string         `json:"duplicate_of,omitempty"`
-	QuarantineReason string         `json:"quarantine_reason,omitempty"`
+	Automated        bool               `json:"automated"`
+	SuppressAutoSend bool               `json:"suppress_auto_send"`
+	BounceClass      ingest.BounceClass `json:"bounce_class,omitempty"` // hard/soft/unknown DSN (FR-M1-07)
+	BounceRecipient  string             `json:"bounce_recipient,omitempty"`
+	DMARCPass        bool               `json:"dmarc_pass"`
+	DuplicateOf      string             `json:"duplicate_of,omitempty"`
+	QuarantineReason string             `json:"quarantine_reason,omitempty"`
 }
 
 type stage struct {
@@ -116,6 +118,8 @@ func (s *stage) handle(ctx context.Context, env pipeline.Envelope) (pipeline.Dec
 		Subject:          res.Message.Subject,
 		Automated:        res.Automated,
 		SuppressAutoSend: res.SuppressAutoSend,
+		BounceClass:      res.BounceClass,
+		BounceRecipient:  res.BounceRecipient,
 		DMARCPass:        res.Message.Auth.DMARCPass,
 		DuplicateOf:      res.DuplicateOf,
 		QuarantineReason: res.QuarantineReason,

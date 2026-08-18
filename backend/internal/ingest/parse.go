@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,10 +40,25 @@ type NormalisedMessage struct {
 	Date       time.Time
 	Text       string          // best-effort plain text (HTML fallback)
 	Automated  bool            // auto-responder / bulk / DSN (FR-M1-06)
-	Bounce     bool            // DSN / bounce (FR-M1-07, minimal)
-	Auth       mailauth.Result // inbound SPF/DKIM/DMARC verdicts (FR-M1-08)
-	header     mail.Header
+	Bounce     bool            // DSN / bounce (FR-M1-07)
+	// Bounce classification (FR-M1-07): hard (permanent → suppress/flag the recipient),
+	// soft (transient → retry), or unknown (undeliverable → human; never silently hard).
+	// Set only when Bounce is true. BounceRecipient is the failed recipient address.
+	BounceClass     BounceClass
+	BounceRecipient string
+	Auth            mailauth.Result // inbound SPF/DKIM/DMARC verdicts (FR-M1-08)
+	header          mail.Header
 }
+
+// BounceClass is the hard/soft/unknown disposition of a DSN/NDR (FR-M1-07).
+type BounceClass string
+
+const (
+	BounceNone    BounceClass = ""        // not a bounce
+	BounceHard    BounceClass = "hard"    // permanent (5.x.x / smtp 5xx / Action:failed) → suppress
+	BounceSoft    BounceClass = "soft"    // transient (4.x.x / smtp 4xx / Action:delayed) → retry
+	BounceUnknown BounceClass = "unknown" // undeliverable, unclassifiable → flag human (never "sent OK")
+)
 
 // Parse reads a raw RFC 5322 message. A hard header parse failure returns an
 // error (the caller quarantines); body decode is best-effort.
@@ -68,6 +84,9 @@ func Parse(raw []byte) (NormalisedMessage, error) {
 	}
 	nm.Text = extractText(h, m.Body)
 	nm.Bounce = isBounce(h)
+	if nm.Bounce {
+		nm.BounceClass, nm.BounceRecipient = classifyBounce(raw)
+	}
 	nm.Automated = isAutomated(h) || nm.Bounce
 	nm.Auth = mailauth.Parse(h.Get("Authentication-Results"))
 	return nm, nil
@@ -107,6 +126,88 @@ func isBounce(h mail.Header) bool {
 	}
 	mt, _, err := mime.ParseMediaType(h.Get("Content-Type"))
 	return err == nil && mt == "multipart/report"
+}
+
+// RFC 3464 machine-readable DSN fields. Matched over the delivery-status part text.
+var (
+	dsnStatusRe    = regexp.MustCompile(`(?im)^Status:\s*([0-9])\.[0-9]+\.[0-9]+`)
+	dsnActionRe    = regexp.MustCompile(`(?im)^Action:\s*([a-zA-Z]+)`)
+	dsnSMTPCodeRe  = regexp.MustCompile(`(?im)^Diagnostic-Code:\s*smtp;\s*([45])[0-9][0-9]`)
+	dsnRecipientRe = regexp.MustCompile(`(?im)^(?:Final|Original)-Recipient:\s*[^;]+;\s*(.+)$`)
+)
+
+// classifyBounce reads a DSN/NDR's machine-readable delivery-status part and returns a
+// hard/soft/unknown class plus the failed recipient (FR-M1-07). Precedence: the RFC 3464
+// Status code (5.x.x hard / 4.x.x soft) wins; else the SMTP Diagnostic-Code (5xx/4xx);
+// else Action (failed=hard / delayed=soft). Anything else is unknown — treated as
+// undeliverable and flagged for a human, never silently hard-suppressed nor "sent OK".
+func classifyBounce(raw []byte) (BounceClass, string) {
+	body := deliveryStatusText(raw)
+
+	recipient := ""
+	if m := dsnRecipientRe.FindStringSubmatch(body); m != nil {
+		recipient = strings.TrimSpace(m[1])
+	}
+
+	if m := dsnStatusRe.FindStringSubmatch(body); m != nil {
+		return classByLeadingDigit(m[1]), recipient
+	}
+	if m := dsnSMTPCodeRe.FindStringSubmatch(body); m != nil {
+		return classByLeadingDigit(m[1]), recipient
+	}
+	switch strings.ToLower(actionOf(body)) {
+	case "failed":
+		return BounceHard, recipient
+	case "delayed":
+		return BounceSoft, recipient
+	}
+	return BounceUnknown, recipient
+}
+
+func classByLeadingDigit(d string) BounceClass {
+	switch d {
+	case "5":
+		return BounceHard
+	case "4":
+		return BounceSoft
+	default:
+		return BounceUnknown
+	}
+}
+
+func actionOf(body string) string {
+	if m := dsnActionRe.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// deliveryStatusText returns the text of the message/delivery-status MIME part of a
+// multipart/report DSN, so the machine-readable fields are matched in isolation. Falls
+// back to the whole raw message when the part cannot be isolated (best-effort, never
+// errors — a malformed DSN still classifies, worst case as unknown).
+func deliveryStatusText(raw []byte) string {
+	m, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return string(raw)
+	}
+	mt, params, err := mime.ParseMediaType(m.Header.Get("Content-Type"))
+	if err != nil || !strings.HasPrefix(mt, "multipart/") {
+		return string(raw)
+	}
+	mr := multipart.NewReader(m.Body, params["boundary"])
+	for {
+		p, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		pt, _, _ := mime.ParseMediaType(p.Header.Get("Content-Type"))
+		if pt == "message/delivery-status" {
+			data, _ := io.ReadAll(p)
+			return string(data)
+		}
+	}
+	return string(raw)
 }
 
 // extractText pulls a best-effort plain-text body. Multipart prefers text/plain,

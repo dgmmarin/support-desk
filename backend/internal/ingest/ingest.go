@@ -26,8 +26,10 @@ type Result struct {
 	ConversationID   string
 	Outcome          Outcome
 	Automated        bool
-	SuppressAutoSend bool   // loop cap reached for the sender (FR-M1-06)
-	DuplicateOf      string // message id this duplicates, when Outcome == Duplicate
+	SuppressAutoSend bool        // loop cap reached for the sender (FR-M1-06)
+	BounceClass      BounceClass // hard/soft/unknown when this is a DSN (FR-M1-07)
+	BounceRecipient  string      // the failed recipient carried by the DSN (FR-M1-07)
+	DuplicateOf      string      // message id this duplicates, when Outcome == Duplicate
 	QuarantineReason string
 }
 
@@ -90,7 +92,8 @@ func Process(ctx context.Context, repo Repo, raw []byte, now time.Time) (Result,
 		}
 	}
 
-	res := Result{Message: msg, ConversationID: convID, Outcome: Ingested, Automated: msg.Automated}
+	res := Result{Message: msg, ConversationID: convID, Outcome: Ingested, Automated: msg.Automated,
+		BounceClass: msg.BounceClass, BounceRecipient: msg.BounceRecipient}
 
 	if msg.Automated && msg.From.Email != "" {
 		// Count prior auto-replies BEFORE recording this one, so the cap blocks

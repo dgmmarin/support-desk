@@ -83,7 +83,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0051](ISSUE-0051-m8-promotion-contradiction-tonebank.md) | Canonical-answer promotion + contradiction detection + tone-example bank | done | M8 | M | 0049, 0034 |
 | [0052](ISSUE-0052-m10-knowledge-dashboard.md) | Knowledge analytics dashboard (coverage, gaps, stale, most/never-cited) | done | M10 | M | 0047, 0032, 0050 |
 | [0053](ISSUE-0053-m1-mail-provider.md) | MailProvider interface + IMAP/SMTP, MS Graph, Gmail providers (swappable, ≤60s to pipeline) | done | M1 | M | 0005, 0020, 0037 |
-| [0054](ISSUE-0054-m1-multimailbox-bounce.md) | Multi-mailbox / multi-identity routing + bounce hard/soft classification + onboarding deliverability validation | todo | M1 | M | 0053, 0037 |
+| [0054](ISSUE-0054-m1-multimailbox-bounce.md) | Multi-mailbox / multi-identity routing + bounce hard/soft classification + onboarding deliverability validation | done | M1 | M | 0053, 0037 |
 | [0055](ISSUE-0055-m7-queue-claim-sla.md) | Case queue scoring service + claim/lock (idle-release) + SLA timers/breach | todo | M7 | M | 0007, 0037 |
 | [0056](ISSUE-0056-m7-search-views-escalation-notes.md) | Case full-text search + saved views/filters + escalation-with-context + internal notes/@mentions | todo | M7 | M | 0055 |
 | [0057](ISSUE-0057-m7-review-booking-actions.md) | Review/evidence read API (three-pane data, inline-citation spans) + booking panel + translation view + autonomy indicator + case actions | todo | M7 | M | 0055, 0045, 0046 |
