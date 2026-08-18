@@ -11,21 +11,39 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"tourdesk/internal/citation"
 	"tourdesk/internal/pipeline"
 	"tourdesk/internal/verify"
 )
 
-// StageInput is what stage 7 consumes.
+// StageInput is what stage 7 consumes. Citations are the generator's per-claim
+// machine-resolvable citations (FR-M5-02); SourceIDs are the retrieved chunk ids they
+// must resolve against. They are consumed deterministically (never fed to the verifier
+// model, keeping it independent — ADR-0007/MOD-03).
 type StageInput struct {
-	Draft   string   `json:"draft"`
-	Sources []string `json:"sources,omitempty"`
+	Draft     string              `json:"draft"`
+	Sources   []string            `json:"sources,omitempty"`
+	Citations []citation.Citation `json:"citations,omitempty"`
+	SourceIDs []string            `json:"source_ids,omitempty"`
 }
 
-// VerifiedEvent carries the verdict downstream to the gate.
+// VerifiedEvent carries the verdict downstream to the gate. Citations are carried on
+// so the console/audit chain (INV-5) retains the resolved per-claim evidence.
 type VerifiedEvent struct {
-	CorrelationID string       `json:"correlation_id"`
-	Pass          bool         `json:"pass"`
-	Flags         verify.Flags `json:"flags"`
+	CorrelationID    string              `json:"correlation_id"`
+	Pass             bool                `json:"pass"`
+	Flags            verify.Flags        `json:"flags"`
+	CitationsResolve bool                `json:"citations_resolve"`
+	Citations        []citation.Citation `json:"citations,omitempty"`
+}
+
+// gateReady reports whether a verified draft may proceed to the gate: the independent
+// model verdict passes AND every machine-resolvable citation resolves to a retrieved
+// source id (FR-M5-02). The citation check is deterministic and independent of the
+// model (ADR-0007). Fail-closed: an unresolved citation blocks auto-send even on a
+// passing model verdict.
+func gateReady(v verify.Verdict, cites []citation.Citation, sourceIDs []string) bool {
+	return v.Pass() && citation.AllResolve(cites, citation.SourceSet(sourceIDs...))
 }
 
 // Serve runs the Verify stage. gateSubject receives passing drafts; humanSubject
@@ -46,10 +64,18 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, vr 
 		if err != nil {
 			return pipeline.Decision{}, err // verifier outage → failed verdict → human (MOD-05)
 		}
-		evt := VerifiedEvent{CorrelationID: env.CorrelationID, Pass: v.Pass(), Flags: v.Flags}
+		resolve := citation.AllResolve(in.Citations, citation.SourceSet(in.SourceIDs...))
+		ready := gateReady(v, in.Citations, in.SourceIDs)
+		evt := VerifiedEvent{
+			CorrelationID:    env.CorrelationID,
+			Pass:             ready,
+			Flags:            v.Flags,
+			CitationsResolve: resolve,
+			Citations:        in.Citations,
+		}
 		subject := gateSubject
-		if !v.Pass() {
-			subject = humanSubject
+		if !ready {
+			subject = humanSubject // failed verdict or unresolved citation → human
 		}
 		return pipeline.Decision{Subject: subject, Payload: evt}, nil
 	})

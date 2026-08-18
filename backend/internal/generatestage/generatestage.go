@@ -11,6 +11,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"tourdesk/internal/citation"
 	"tourdesk/internal/generate"
 	"tourdesk/internal/pipeline"
 )
@@ -25,16 +26,20 @@ type StageInput struct {
 	ApprovedLanguage bool             `json:"approved_language"`
 }
 
-// GeneratedEvent carries the draft downstream to Verify / the gate.
+// GeneratedEvent carries the draft downstream to Verify / the gate. Citations are
+// the per-claim machine-resolvable citations (FR-M5-02); UncertaintyNotes + Partial
+// carry the explicit partial-answer marking (FR-M5-03) for the console and gate.
 type GeneratedEvent struct {
-	CorrelationID string   `json:"correlation_id"`
-	Content       string   `json:"content"`
-	Language      string   `json:"language,omitempty"`
-	Abstained     bool     `json:"abstained"`
-	GuardPass     bool     `json:"guard_pass"`
-	DraftOnly     bool     `json:"draft_only"`
-	UsedCanonical bool     `json:"used_canonical"`
-	Citations     []string `json:"citations,omitempty"`
+	CorrelationID    string              `json:"correlation_id"`
+	Content          string              `json:"content"`
+	Language         string              `json:"language,omitempty"`
+	Abstained        bool                `json:"abstained"`
+	GuardPass        bool                `json:"guard_pass"`
+	DraftOnly        bool                `json:"draft_only"`
+	Partial          bool                `json:"partial"`
+	UsedCanonical    bool                `json:"used_canonical"`
+	Citations        []citation.Citation `json:"citations,omitempty"`
+	UncertaintyNotes []string            `json:"uncertainty_notes,omitempty"`
 }
 
 // Serve runs the Generate stage. verifySubject receives drafts to verify;
@@ -63,14 +68,16 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, svc
 			return pipeline.Decision{}, err // generator outage → fail to human (MOD-05)
 		}
 		evt := GeneratedEvent{
-			CorrelationID: env.CorrelationID,
-			Content:       d.Content,
-			Language:      d.Language,
-			Abstained:     d.Abstained,
-			GuardPass:     d.GuardPass,
-			DraftOnly:     d.DraftOnly,
-			UsedCanonical: d.UsedCanonical,
-			Citations:     d.Citations,
+			CorrelationID:    env.CorrelationID,
+			Content:          d.Content,
+			Language:         d.Language,
+			Abstained:        d.Abstained,
+			GuardPass:        d.GuardPass,
+			DraftOnly:        d.DraftOnly,
+			Partial:          d.Partial,
+			UsedCanonical:    d.UsedCanonical,
+			Citations:        d.Citations,
+			UncertaintyNotes: d.UncertaintyNotes,
 		}
 		subject := verifySubject
 		if d.Abstained {

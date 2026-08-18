@@ -68,7 +68,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0036](ISSUE-0036-m8-eval-set-regression-gate.md) | Frozen eval set + regression gate + change-log/rollback + tenant-isolated learning guard | done | M8 | M | 0023, 0017 |
 | [0037](ISSUE-0037-m11-tenant-config-store.md) | Per-tenant configuration store (brands, mailboxes, languages, SLAs, voice, disclosure text, exclusion lists, retention) | done | M11 | M | 0003, 0036 |
 | [0038](ISSUE-0038-m3-entity-extraction.md) | M3 entity extraction (booking ref, destination, dates, pax, flight no., amounts) | done | M3 | M | 0024 |
-| [0039](ISSUE-0039-m5-per-claim-citations.md) | M5 per-claim machine-resolvable citations + explicit partial-answer marking | todo | M5 | M | 0027, 0028 |
+| [0039](ISSUE-0039-m5-per-claim-citations.md) | M5 per-claim machine-resolvable citations + explicit partial-answer marking | done | M5 | M | 0027, 0028 |
 | [0040](ISSUE-0040-m5-voice-anti-fabrication.md) | M5 voice profile application + anti-fabrication resolution (links/phones/refs from config only) | todo | M5 | M | 0027, 0037 |
 | [0041](ISSUE-0041-m13-ai-disclosure.md) | AI-disclosure config + machine-readable AI marking + per-message model/version log | todo | M13 | M | 0037, 0012 |
 | [0042](ISSUE-0042-m6-gate-human-exclusion.md) | Gate: no auto-send when a human already replied / recipient on exclusion list or requested human | todo | M6 | M | 0018, 0008, 0037 |

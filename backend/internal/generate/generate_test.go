@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"tourdesk/internal/citation"
 )
 
 // fakeGen records the last prompt and returns a canned reply (or error).
@@ -134,6 +136,103 @@ func TestCommitmentGuard(t *testing.T) {
 	})
 	if !d3.GuardPass {
 		t.Fatal("a no-commitment draft must pass the guard")
+	}
+}
+
+// test_FR_M5_02_claim_carries_resolvable_citation — a grounded claim carries a
+// machine-resolvable citation to the exact retrieved chunk id, and the internal
+// [chunk ..] marker is stripped from the customer-facing content.
+func TestClaimCarriesResolvableCitation(t *testing.T) {
+	g := &fakeGen{reply: "Baggage allowance is 20kg [chunk k1]."}
+	in := Input{
+		Query:            "baggage?",
+		Chunks:           []Chunk{{ID: "k1", Text: "Baggage allowance is 20kg.", Score: 3}},
+		ApprovedLanguage: true, DisclosureText: "AI.",
+	}
+	d, err := svc(g).Draft(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+	if len(d.Citations) != 1 {
+		t.Fatalf("expected one per-claim citation, got %+v", d.Citations)
+	}
+	c := d.Citations[0]
+	if c.KnowledgeItemID != "k1" || c.Score != 3 || !strings.Contains(c.ClaimSpan, "Baggage allowance is 20kg") {
+		t.Fatalf("citation must map the claim span to chunk k1 with its score, got %+v", c)
+	}
+	if !c.Resolves(citation.SourceSet("k1")) {
+		t.Fatal("the citation must resolve against the retrieved chunk-id set (FR-M5-02)")
+	}
+	if d.Partial {
+		t.Fatal("a fully grounded draft must not be marked partial")
+	}
+	if strings.Contains(d.Content, "[chunk") {
+		t.Fatalf("the internal citation marker must be stripped from the customer content, got %q", d.Content)
+	}
+}
+
+// test_FR_M5_03_ungrounded_claim_marked_partial — an uncited claim is explicitly
+// marked partial (uncertainty note + Partial flag) and is NOT emitted as a grounded
+// citation, while the grounded claim beside it still carries its citation.
+func TestUngroundedClaimMarkedPartial(t *testing.T) {
+	g := &fakeGen{reply: "Baggage allowance is 20kg [chunk k1]. Refunds are processed within 30 days."}
+	in := Input{
+		Query:            "baggage and refunds?",
+		Chunks:           []Chunk{{ID: "k1", Text: "Baggage allowance is 20kg."}},
+		ApprovedLanguage: true, DisclosureText: "AI.",
+	}
+	d, _ := svc(g).Draft(context.Background(), in)
+	if !d.Partial {
+		t.Fatal("an uncited claim must mark the draft partial (FR-M5-03)")
+	}
+	if len(d.UncertaintyNotes) == 0 {
+		t.Fatal("the ungrounded part must be explicitly noted for the agent (FR-M5-03)")
+	}
+	if len(d.Citations) != 1 || d.Citations[0].KnowledgeItemID != "k1" {
+		t.Fatalf("only the grounded claim may carry a citation, got %+v", d.Citations)
+	}
+	for _, c := range d.Citations {
+		if strings.Contains(c.ClaimSpan, "Refunds") {
+			t.Fatal("the ungrounded claim must not be asserted as a grounded citation")
+		}
+	}
+}
+
+// test_FR_M5_02_unresolved_citation_marked_partial — a marker naming an id absent
+// from the retrieved set does not resolve: partial, no resolving citation (fail-closed).
+func TestUnresolvedCitationMarkedPartial(t *testing.T) {
+	g := &fakeGen{reply: "Refunds are processed within 30 days [chunk ghost]."}
+	in := Input{
+		Query:            "refunds?",
+		Chunks:           []Chunk{{ID: "k1", Text: "Baggage allowance is 20kg."}},
+		ApprovedLanguage: true, DisclosureText: "AI.",
+	}
+	d, _ := svc(g).Draft(context.Background(), in)
+	if !d.Partial {
+		t.Fatal("a citation to an id absent from the retrieved set must mark the draft partial")
+	}
+	for _, c := range d.Citations {
+		if c.KnowledgeItemID == "ghost" {
+			t.Fatal("an unresolvable citation must never be asserted as grounded")
+		}
+	}
+}
+
+// test_FR_M5_02_canonical_grounds_verbatim — the canonical fast path yields a
+// resolving citation to the canonical chunk and is not partial.
+func TestCanonicalCitation(t *testing.T) {
+	g := &fakeGen{err: errors.New("model must not be called")}
+	in := Input{
+		Query:            "check-in?",
+		Chunks:           []Chunk{{ID: "c1", Text: "Check-in opens 24h before departure.", Canonical: true, Score: 9}},
+		ApprovedLanguage: true, DisclosureText: "AI.",
+	}
+	d, _ := svc(g).Draft(context.Background(), in)
+	if len(d.Citations) != 1 || d.Citations[0].KnowledgeItemID != "c1" {
+		t.Fatalf("canonical reuse must cite the canonical chunk, got %+v", d.Citations)
+	}
+	if !d.Citations[0].Resolves(citation.SourceSet("c1")) || d.Partial {
+		t.Fatalf("canonical answer must be grounded and not partial, got %+v", d)
 	}
 }
 

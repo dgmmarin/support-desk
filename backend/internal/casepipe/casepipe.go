@@ -18,6 +18,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"tourdesk/internal/assemblestage"
+	"tourdesk/internal/citation"
 	"tourdesk/internal/confidence"
 	"tourdesk/internal/disclosure"
 	"tourdesk/internal/gate"
@@ -59,9 +60,11 @@ type Case struct {
 	Chunks []generate.Chunk `json:"chunks,omitempty"`
 
 	// Generate.
-	Draft     string `json:"draft,omitempty"`
-	GuardPass bool   `json:"guard_pass"`
-	DraftOnly bool   `json:"draft_only"`
+	Draft     string              `json:"draft,omitempty"`
+	GuardPass bool                `json:"guard_pass"`
+	DraftOnly bool                `json:"draft_only"`
+	Partial   bool                `json:"partial"`             // ungrounded part marked (FR-M5-03)
+	Citations []citation.Citation `json:"citations,omitempty"` // per-claim machine-resolvable (FR-M5-02)
 
 	// Verify.
 	VerifyPass bool `json:"verify_pass"`
@@ -230,7 +233,7 @@ func (w *wiring) retrieve(_ context.Context, tenantID string, c *Case) (string, 
 	}
 	c.Chunks = nil
 	for _, r := range rc.Results {
-		c.Chunks = append(c.Chunks, generate.Chunk{ID: r.ChunkID, Text: r.Text, URL: r.URL, Canonical: r.Tier == knowledge.Canonical})
+		c.Chunks = append(c.Chunks, generate.Chunk{ID: r.ChunkID, Text: r.Text, URL: r.URL, Score: r.Score, Canonical: r.Tier == knowledge.Canonical})
 	}
 	return w.subj.Generate, nil
 }
@@ -246,6 +249,8 @@ func (w *wiring) generate(ctx context.Context, _ string, c *Case) (string, error
 	c.Draft = d.Content
 	c.GuardPass = d.GuardPass
 	c.DraftOnly = d.DraftOnly
+	c.Partial = d.Partial
+	c.Citations = d.Citations
 	if d.Abstained {
 		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
@@ -255,15 +260,19 @@ func (w *wiring) generate(ctx context.Context, _ string, c *Case) (string, error
 
 func (w *wiring) verify(ctx context.Context, _ string, c *Case) (string, error) {
 	sources := make([]string, 0, len(c.Chunks))
+	ids := make([]string, 0, len(c.Chunks))
 	for _, ch := range c.Chunks {
 		sources = append(sources, ch.Text)
+		ids = append(ids, ch.ID)
 	}
 	v, err := w.deps.Verifier.Verify(ctx, c.Draft, sources)
 	if err != nil {
 		return "", err // verifier outage → fail to human (MOD-05)
 	}
-	c.VerifyPass = v.Pass()
-	if !v.Pass() {
+	// The model verdict AND deterministic citation resolution (ADR-0007): an
+	// unresolved per-claim citation blocks the gate even on a passing verdict (FR-M5-02).
+	c.VerifyPass = v.Pass() && citation.AllResolve(c.Citations, citation.SourceSet(ids...))
+	if !c.VerifyPass {
 		c.Terminal = observe.RouteHumanReview
 		return w.subj.Human, nil
 	}
