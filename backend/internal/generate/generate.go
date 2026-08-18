@@ -100,6 +100,7 @@ type Input struct {
 	ApprovedLanguage bool              // tenant has an approved capability in Language (FR-M5-05)
 	Voice            Voice             // tenant voice profile (FR-M5-04)
 	VoiceSet         bool              // tenant configured a voice; unset → draft-only (FR-M5-04)
+	Examples         []string          // tone-example bank few-shot examples (FR-M8-04); empty → voice-only
 	Allowlist        antifab.Allowlist // anti-fabrication source of truth (FR-M5-08)
 
 	// Personalisation (FR-M5-10/11), gated by the disclosure matrix (ADR-0011, G08).
@@ -155,7 +156,7 @@ func (s Service) Draft(ctx context.Context, in Input) (Draft, error) {
 		d.UsedCanonical = true
 		d.Citations = []citation.Citation{{ClaimSpan: c.Text, KnowledgeItemID: c.ID, Score: c.Score}}
 	} else {
-		text, err := s.Gen.Generate(ctx, buildSystem(in.Voice), buildUserPrompt(in))
+		text, err := s.Gen.Generate(ctx, buildSystem(in.Voice, in.Examples), buildUserPrompt(in))
 		if err != nil {
 			return Draft{}, err // provider outage → fail to human (MOD-05)
 		}
@@ -268,7 +269,8 @@ func personalize(d *Draft, in Input) []string {
 // buildSystem returns the generator system prompt, extended with the tenant voice
 // (FR-M5-04) so tone and formality steer the reply. The grounding/untrusted-data
 // rules are invariant; the voice guidance is appended, never replacing them.
-func buildSystem(v Voice) string {
+func buildSystem(v Voice, examples []string) string {
+	sys := generateSystem
 	var voice []string
 	if v.Tone != "" {
 		voice = append(voice, "tone: "+v.Tone)
@@ -276,10 +278,19 @@ func buildSystem(v Voice) string {
 	if v.Formality != "" {
 		voice = append(voice, "formality: "+v.Formality)
 	}
-	if len(voice) == 0 {
-		return generateSystem
+	if len(voice) > 0 {
+		sys += "\nWrite the reply in the tenant's voice — " + strings.Join(voice, ", ") + "."
 	}
-	return generateSystem + "\nWrite the reply in the tenant's voice — " + strings.Join(voice, ", ") + "."
+	// FR-M8-04 tone-example bank: exemplary approved replies steer style as few-shot
+	// examples. Empty bank → nothing appended (voice-only). Examples are trusted config
+	// (approved, PII-stripped), not customer input, so they sit in the system prompt.
+	if len(examples) > 0 {
+		sys += "\nMatch the style of these example replies:"
+		for _, ex := range examples {
+			sys += "\n- Example reply: " + ex
+		}
+	}
+	return sys
 }
 
 func canonical(chunks []Chunk) (Chunk, bool) {

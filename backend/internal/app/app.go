@@ -13,10 +13,12 @@ import (
 
 	"tourdesk/internal/analytics"
 	"tourdesk/internal/bus"
+	"tourdesk/internal/canonpromote"
 	"tourdesk/internal/clog"
 	"tourdesk/internal/config"
 	"tourdesk/internal/health"
 	"tourdesk/internal/knowledgebrowser"
+	"tourdesk/internal/knowledgeindex"
 	"tourdesk/internal/store"
 )
 
@@ -70,6 +72,8 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 	mux.Handle("/analytics/", analytics.Handler{DB: appDB})
 	// M4 knowledge browser (tenant-scoped): /knowledge/{search,stale,retire}.
 	mux.Handle("/knowledge/", knowledgebrowser.Handler{DB: appDB})
+	// M8 canonical-answer promotion (tenant-scoped, human-gated): /promotion/{propose,approve}.
+	mux.Handle("/promotion/", canonpromote.Handler{DB: appDB, Index: knowledgeindex.New(knowledgeindex.HashEmbedder{})})
 
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

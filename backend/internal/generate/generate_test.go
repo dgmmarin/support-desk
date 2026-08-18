@@ -263,6 +263,34 @@ func TestVoiceProfileApplied(t *testing.T) {
 	}
 }
 
+// test_FR_M8_04_tone_examples_fewshot — the tone-example bank feeds generation as
+// few-shot examples; an empty bank leaves the prompt at voice-only (the default).
+func TestToneExampleBankFewShot(t *testing.T) {
+	withBank := &fakeGen{reply: "Baggage allowance is 20kg."}
+	in := Input{
+		Query: "baggage?", Chunks: []Chunk{{ID: "k1", Text: "20kg"}},
+		ApprovedLanguage: true, DisclosureText: "AI.", VoiceSet: true,
+		Voice:    Voice{Tone: "warm"},
+		Examples: []string{"Happy to help! Your baggage allowance is 20kg."},
+	}
+	if _, err := svc(withBank).Draft(context.Background(), in); err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+	if !strings.Contains(withBank.lastSystem, "Happy to help!") {
+		t.Fatalf("a tone example must reach the model prompt as a few-shot example (FR-M8-04), got %q", withBank.lastSystem)
+	}
+
+	// Empty bank ⇒ voice-only: the system prompt carries no examples block.
+	empty := &fakeGen{reply: "Baggage allowance is 20kg."}
+	in.Examples = nil
+	if _, err := svc(empty).Draft(context.Background(), in); err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+	if strings.Contains(strings.ToLower(empty.lastSystem), "example reply") {
+		t.Fatalf("an empty bank must fall back to voice-only (FR-M8-04), got %q", empty.lastSystem)
+	}
+}
+
 // test_FR_M5_04_missing_voice_draft_only — no configured voice ⇒ safe neutral
 // default, draft-only (never auto-send).
 func TestMissingVoiceDraftOnly(t *testing.T) {
