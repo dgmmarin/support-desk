@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"tourdesk/internal/antifab"
 	"tourdesk/internal/citation"
 )
 
@@ -233,6 +234,99 @@ func TestCanonicalCitation(t *testing.T) {
 	}
 	if !d.Citations[0].Resolves(citation.SourceSet("c1")) || d.Partial {
 		t.Fatalf("canonical answer must be grounded and not partial, got %+v", d)
+	}
+}
+
+// test_FR_M5_04_voice_profile_applied — the tenant voice profile steers the draft:
+// tone/formality reach the model (system prompt) and the signature is appended
+// deterministically to the customer content.
+func TestVoiceProfileApplied(t *testing.T) {
+	g := &fakeGen{reply: "Baggage allowance is 20kg."}
+	in := Input{
+		Query: "baggage?", Chunks: []Chunk{{ID: "k1", Text: "20kg"}},
+		ApprovedLanguage: true, DisclosureText: "AI.",
+		VoiceSet: true, Voice: Voice{Tone: "warm", Formality: "formal", Signature: "— Alpha Tours"},
+	}
+	d, err := svc(g).Draft(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+	sys := strings.ToLower(g.lastSystem)
+	if !strings.Contains(sys, "warm") || !strings.Contains(sys, "formal") {
+		t.Fatalf("tone/formality must reach the model prompt (FR-M5-04), got %q", g.lastSystem)
+	}
+	if !strings.Contains(d.Content, "— Alpha Tours") {
+		t.Fatalf("signature must be applied to the draft, got %q", d.Content)
+	}
+	if d.DraftOnly {
+		t.Fatal("a configured voice must not force draft-only")
+	}
+}
+
+// test_FR_M5_04_missing_voice_draft_only — no configured voice ⇒ safe neutral
+// default, draft-only (never auto-send).
+func TestMissingVoiceDraftOnly(t *testing.T) {
+	g := &fakeGen{reply: "Baggage allowance is 20kg."}
+	d, _ := svc(g).Draft(context.Background(), Input{
+		Query: "baggage?", Chunks: []Chunk{{ID: "k1", Text: "20kg"}},
+		ApprovedLanguage: true, DisclosureText: "AI.", VoiceSet: false,
+	})
+	if !d.DraftOnly {
+		t.Fatal("missing voice profile must force draft-only (FR-M5-04)")
+	}
+}
+
+// test_FR_M5_08_allowlisted_contact_passes — a link/phone/ref in the tenant allowlist
+// survives generation.
+func TestAllowlistedContactPasses(t *testing.T) {
+	g := &fakeGen{reply: "See https://alpha.example/faq or call +34 900 111 222 quoting ALPHA-REF."}
+	d, _ := svc(g).Draft(context.Background(), Input{
+		Query: "help?", Chunks: []Chunk{{ID: "k1", Text: "support"}},
+		ApprovedLanguage: true, DisclosureText: "AI.", VoiceSet: true,
+		Allowlist: antifab.Allowlist{Links: []string{"https://alpha.example/faq"}, Phones: []string{"+34 900 111 222"}, References: []string{"ALPHA-REF"}},
+	})
+	if d.FabricationStripped {
+		t.Fatalf("allowlisted contact details must not be stripped, got %q", d.Content)
+	}
+	for _, want := range []string{"alpha.example/faq", "+34 900 111 222", "ALPHA-REF"} {
+		if !strings.Contains(d.Content, want) {
+			t.Fatalf("allowlisted %q must remain, got %q", want, d.Content)
+		}
+	}
+}
+
+// test_FR_M5_08_fabricated_contact_stripped — a link/phone/ref the model invents
+// (absent from the allowlist) is stripped from the draft and flagged.
+func TestFabricatedContactStripped(t *testing.T) {
+	g := &fakeGen{reply: "Reset it at https://evil.example/phish or call +34 611 000 999 quoting FAKE-REF-9."}
+	d, _ := svc(g).Draft(context.Background(), Input{
+		Query: "help?", Chunks: []Chunk{{ID: "k1", Text: "support"}},
+		ApprovedLanguage: true, DisclosureText: "AI.", VoiceSet: true,
+		Allowlist: antifab.Allowlist{Links: []string{"https://alpha.example/faq"}},
+	})
+	if !d.FabricationStripped {
+		t.Fatal("a fabricated contact detail must be flagged (FR-M5-08)")
+	}
+	for _, gone := range []string{"evil.example", "611 000 999", "FAKE-REF-9"} {
+		if strings.Contains(d.Content, gone) {
+			t.Fatalf("fabricated %q must be stripped, got %q", gone, d.Content)
+		}
+	}
+	if len(d.UncertaintyNotes) == 0 {
+		t.Fatal("stripped contact details must be noted for the agent")
+	}
+}
+
+// test_FR_M5_08_empty_allowlist_blocks_contact — fail-closed: with no configured
+// allowlist any concrete contact detail is stripped (never emit an unverified one).
+func TestEmptyAllowlistBlocksContact(t *testing.T) {
+	g := &fakeGen{reply: "Visit www.alpha.example/booking to continue."}
+	d, _ := svc(g).Draft(context.Background(), Input{
+		Query: "book?", Chunks: []Chunk{{ID: "k1", Text: "booking"}},
+		ApprovedLanguage: true, DisclosureText: "AI.", VoiceSet: true,
+	})
+	if !d.FabricationStripped || strings.Contains(d.Content, "alpha.example") {
+		t.Fatalf("empty allowlist must strip any contact detail, got %q", d.Content)
 	}
 }
 

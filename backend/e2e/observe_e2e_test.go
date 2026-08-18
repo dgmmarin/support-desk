@@ -112,7 +112,8 @@ func TestE2EObservePersistsTelemetrySpanningCorrelationID(t *testing.T) {
 		Verifier:       verify.NewLLMVerifier(llm.NewHTTPProvider(verifier.URL, "k", verifier.Client()), "v"),
 		Policy:         store.AutonomyPolicy{Level: 2, Allowlisted: true, Threshold: 0.98, MaxRisk: 0, Calibrated: true, AuditCount: 500},
 		DisclosureText: "This reply was AI-assisted.",
-		Clock:          func() time.Time { return at },
+		Voice:          generate.Voice{Tone: "neutral", Signature: "— Support"}, VoiceSet: true, // FR-M5-04
+		Clock: func() time.Time { return at },
 	}
 
 	subj := casepipe.Subjects{

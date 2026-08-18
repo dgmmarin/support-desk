@@ -17,6 +17,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"tourdesk/internal/antifab"
 	"tourdesk/internal/assemblestage"
 	"tourdesk/internal/citation"
 	"tourdesk/internal/confidence"
@@ -84,6 +85,9 @@ type Deps struct {
 	Verifier       verify.Verifier
 	Policy         store.AutonomyPolicy
 	DisclosureText string
+	Voice          generate.Voice    // tenant voice profile (FR-M5-04)
+	VoiceSet       bool              // tenant configured a voice; unset → draft-only (FR-M5-04)
+	Allowlist      antifab.Allowlist // anti-fabrication allowlist (FR-M5-08)
 	Clock          func() time.Time
 }
 
@@ -242,6 +246,7 @@ func (w *wiring) generate(ctx context.Context, _ string, c *Case) (string, error
 	d, err := w.deps.Generator.Draft(ctx, generate.Input{
 		Query: c.Query, Chunks: c.Chunks, Language: c.Language,
 		DisclosureText: w.deps.DisclosureText, ApprovedLanguage: true,
+		Voice: w.deps.Voice, VoiceSet: w.deps.VoiceSet, Allowlist: w.deps.Allowlist,
 	})
 	if err != nil {
 		return "", err // generator outage → fail to human (MOD-05)

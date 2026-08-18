@@ -11,6 +11,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"tourdesk/internal/antifab"
 	"tourdesk/internal/citation"
 	"tourdesk/internal/generate"
 	"tourdesk/internal/pipeline"
@@ -18,28 +19,32 @@ import (
 
 // StageInput is what stage 6 consumes.
 type StageInput struct {
-	Query            string           `json:"query"`
-	Chunks           []generate.Chunk `json:"chunks,omitempty"`
-	Language         string           `json:"language,omitempty"`
-	DisclosureText   string           `json:"disclosure_text,omitempty"`
-	Sourced          []string         `json:"sourced,omitempty"`
-	ApprovedLanguage bool             `json:"approved_language"`
+	Query            string            `json:"query"`
+	Chunks           []generate.Chunk  `json:"chunks,omitempty"`
+	Language         string            `json:"language,omitempty"`
+	DisclosureText   string            `json:"disclosure_text,omitempty"`
+	Sourced          []string          `json:"sourced,omitempty"`
+	ApprovedLanguage bool              `json:"approved_language"`
+	Voice            generate.Voice    `json:"voice,omitempty"`     // tenant voice profile (FR-M5-04)
+	VoiceSet         bool              `json:"voice_set"`           // tenant configured a voice (FR-M5-04)
+	Allowlist        antifab.Allowlist `json:"allowlist,omitempty"` // anti-fabrication allowlist (FR-M5-08)
 }
 
 // GeneratedEvent carries the draft downstream to Verify / the gate. Citations are
 // the per-claim machine-resolvable citations (FR-M5-02); UncertaintyNotes + Partial
 // carry the explicit partial-answer marking (FR-M5-03) for the console and gate.
 type GeneratedEvent struct {
-	CorrelationID    string              `json:"correlation_id"`
-	Content          string              `json:"content"`
-	Language         string              `json:"language,omitempty"`
-	Abstained        bool                `json:"abstained"`
-	GuardPass        bool                `json:"guard_pass"`
-	DraftOnly        bool                `json:"draft_only"`
-	Partial          bool                `json:"partial"`
-	UsedCanonical    bool                `json:"used_canonical"`
-	Citations        []citation.Citation `json:"citations,omitempty"`
-	UncertaintyNotes []string            `json:"uncertainty_notes,omitempty"`
+	CorrelationID       string              `json:"correlation_id"`
+	Content             string              `json:"content"`
+	Language            string              `json:"language,omitempty"`
+	Abstained           bool                `json:"abstained"`
+	GuardPass           bool                `json:"guard_pass"`
+	DraftOnly           bool                `json:"draft_only"`
+	Partial             bool                `json:"partial"`
+	FabricationStripped bool                `json:"fabrication_stripped"` // FR-M5-08
+	UsedCanonical       bool                `json:"used_canonical"`
+	Citations           []citation.Citation `json:"citations,omitempty"`
+	UncertaintyNotes    []string            `json:"uncertainty_notes,omitempty"`
 }
 
 // Serve runs the Generate stage. verifySubject receives drafts to verify;
@@ -63,21 +68,25 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, svc
 			DisclosureText:   in.DisclosureText,
 			Sourced:          in.Sourced,
 			ApprovedLanguage: in.ApprovedLanguage,
+			Voice:            in.Voice,
+			VoiceSet:         in.VoiceSet,
+			Allowlist:        in.Allowlist,
 		})
 		if err != nil {
 			return pipeline.Decision{}, err // generator outage → fail to human (MOD-05)
 		}
 		evt := GeneratedEvent{
-			CorrelationID:    env.CorrelationID,
-			Content:          d.Content,
-			Language:         d.Language,
-			Abstained:        d.Abstained,
-			GuardPass:        d.GuardPass,
-			DraftOnly:        d.DraftOnly,
-			Partial:          d.Partial,
-			UsedCanonical:    d.UsedCanonical,
-			Citations:        d.Citations,
-			UncertaintyNotes: d.UncertaintyNotes,
+			CorrelationID:       env.CorrelationID,
+			Content:             d.Content,
+			Language:            d.Language,
+			Abstained:           d.Abstained,
+			GuardPass:           d.GuardPass,
+			DraftOnly:           d.DraftOnly,
+			Partial:             d.Partial,
+			FabricationStripped: d.FabricationStripped,
+			UsedCanonical:       d.UsedCanonical,
+			Citations:           d.Citations,
+			UncertaintyNotes:    d.UncertaintyNotes,
 		}
 		subject := verifySubject
 		if d.Abstained {

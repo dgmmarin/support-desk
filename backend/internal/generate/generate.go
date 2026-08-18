@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 
+	"tourdesk/internal/antifab"
 	"tourdesk/internal/citation"
 	"tourdesk/internal/commitment"
 	"tourdesk/internal/llm"
@@ -58,28 +59,40 @@ type Chunk struct {
 	Canonical bool // top authority tier → verbatim fast path (SR-M5-02)
 }
 
+// Voice is the tenant voice profile applied to the draft (FR-M5-04). Tone/Formality
+// steer the model via the system prompt; Signature is appended deterministically.
+type Voice struct {
+	Tone      string `json:"tone,omitempty"`
+	Formality string `json:"formality,omitempty"`
+	Signature string `json:"signature,omitempty"`
+}
+
 // Input is the generation context (spec §3).
 type Input struct {
 	Query            string
 	Chunks           []Chunk
 	Language         string
-	DisclosureText   string   // tenant AI disclosure (FR-M5-09)
-	Sourced          []string // commitment values sourced from connector/human (FR-M5-06)
-	ApprovedLanguage bool     // tenant has an approved capability in Language (FR-M5-05)
+	DisclosureText   string            // tenant AI disclosure (FR-M5-09)
+	Sourced          []string          // commitment values sourced from connector/human (FR-M5-06)
+	ApprovedLanguage bool              // tenant has an approved capability in Language (FR-M5-05)
+	Voice            Voice             // tenant voice profile (FR-M5-04)
+	VoiceSet         bool              // tenant configured a voice; unset → draft-only (FR-M5-04)
+	Allowlist        antifab.Allowlist // anti-fabrication source of truth (FR-M5-08)
 }
 
 // Draft is the stage output. Abstained/GuardPass/DraftOnly are read by the gate.
 type Draft struct {
-	Content          string
-	Language         string
-	Abstained        bool // no context → no factual claim (FR-M5-01)
-	GuardPass        bool // commitment guard result (FR-M5-06 → gate G10)
-	UsedCanonical    bool // reused a canonical answer verbatim (SR-M5-02)
-	DraftOnly        bool // unapproved language / missing disclosure → never auto-send
-	Partial          bool // a claim could not be grounded → explicitly marked (FR-M5-03)
-	ModelVersion     string
-	Citations        []citation.Citation // per-claim machine-resolvable citations (FR-M5-02)
-	UncertaintyNotes []string            // ungrounded/partial markers for the agent (FR-M5-03)
+	Content             string
+	Language            string
+	Abstained           bool // no context → no factual claim (FR-M5-01)
+	GuardPass           bool // commitment guard result (FR-M5-06 → gate G10)
+	UsedCanonical       bool // reused a canonical answer verbatim (SR-M5-02)
+	DraftOnly           bool // unapproved language / missing disclosure → never auto-send
+	Partial             bool // a claim could not be grounded → explicitly marked (FR-M5-03)
+	FabricationStripped bool // a non-allowlisted contact detail was removed (FR-M5-08)
+	ModelVersion        string
+	Citations           []citation.Citation // per-claim machine-resolvable citations (FR-M5-02)
+	UncertaintyNotes    []string            // ungrounded/partial markers for the agent (FR-M5-03)
 }
 
 // Service produces drafts from a Generator.
@@ -110,13 +123,30 @@ func (s Service) Draft(ctx context.Context, in Input) (Draft, error) {
 		d.UsedCanonical = true
 		d.Citations = []citation.Citation{{ClaimSpan: c.Text, KnowledgeItemID: c.ID, Score: c.Score}}
 	} else {
-		text, err := s.Gen.Generate(ctx, generateSystem, buildUserPrompt(in))
+		text, err := s.Gen.Generate(ctx, buildSystem(in.Voice), buildUserPrompt(in))
 		if err != nil {
 			return Draft{}, err // provider outage → fail to human (MOD-05)
 		}
 		// Map the model's marked output into per-claim machine-resolvable citations
 		// (FR-M5-02) and mark any ungrounded part partial (FR-M5-03).
 		d.Content, d.Citations, d.UncertaintyNotes, d.Partial = resolveClaims(text, in.Chunks)
+
+		// FR-M5-08 anti-fabrication — deterministic pass over the model's own output:
+		// strip any link/phone/reference the tenant allowlist does not vouch for, so an
+		// invented contact detail is never sent. A canonical answer is grounded-by-
+		// construction (its chunk is the source), so it is not scanned.
+		if clean, stripped := antifab.Resolve(d.Content, in.Allowlist); len(stripped) > 0 {
+			d.Content = clean
+			d.FabricationStripped = true
+			for _, s := range stripped {
+				d.UncertaintyNotes = append(d.UncertaintyNotes, "fabricated contact detail removed (not in tenant allowlist): "+s)
+			}
+		}
+	}
+
+	// FR-M5-04 voice signature — appended deterministically (config-sourced, trusted).
+	if sig := strings.TrimSpace(in.Voice.Signature); sig != "" {
+		d.Content = strings.TrimRight(d.Content, "\n") + "\n\n" + sig
 	}
 
 	// FR-M5-09 disclosure — required; its absence blocks auto-send.
@@ -131,9 +161,31 @@ func (s Service) Draft(ctx context.Context, in Input) (Draft, error) {
 		d.DraftOnly = true
 	}
 
+	// FR-M5-04 missing voice profile → safe neutral default (used above), draft-only.
+	if !in.VoiceSet {
+		d.DraftOnly = true
+	}
+
 	// FR-M5-06 deterministic commitment guard.
 	d.GuardPass = commitmentsSourced(d.Content, in.Sourced)
 	return d, nil
+}
+
+// buildSystem returns the generator system prompt, extended with the tenant voice
+// (FR-M5-04) so tone and formality steer the reply. The grounding/untrusted-data
+// rules are invariant; the voice guidance is appended, never replacing them.
+func buildSystem(v Voice) string {
+	var voice []string
+	if v.Tone != "" {
+		voice = append(voice, "tone: "+v.Tone)
+	}
+	if v.Formality != "" {
+		voice = append(voice, "formality: "+v.Formality)
+	}
+	if len(voice) == 0 {
+		return generateSystem
+	}
+	return generateSystem + "\nWrite the reply in the tenant's voice — " + strings.Join(voice, ", ") + "."
 }
 
 func canonical(chunks []Chunk) (Chunk, bool) {
@@ -203,17 +255,25 @@ func resolveClaims(text string, chunks []Chunk) (content string, cites []citatio
 	return content, cites, notes, partial
 }
 
-var sentenceSplitRe = regexp.MustCompile(`[.!?\n]+`)
+// A sentence boundary: a run of .!? followed by whitespace or end-of-text, or a
+// newline. A period NOT followed by whitespace (a URL, a decimal, a reference code
+// like ALPHA-REF) is deliberately not a boundary, so those tokens survive intact for
+// the anti-fabrication pass (FR-M5-08) instead of being shattered into fragments.
+var sentenceSplitRe = regexp.MustCompile(`[.!?]+(?:\s+|$)|\n+`)
 
-// splitSentences breaks generator output into claim-sized spans on sentence
-// terminators and newlines; the terminal punctuation is dropped and re-added when the
-// cleaned spans are joined.
+// splitSentences breaks generator output into claim-sized spans, keeping each span's
+// terminal punctuation. A trailing unterminated fragment gets a "." appended.
 func splitSentences(text string) []string {
 	var out []string
-	for _, p := range sentenceSplitRe.Split(text, -1) {
-		if s := strings.TrimSpace(p); s != "" {
-			out = append(out, s+".")
+	last := 0
+	for _, loc := range sentenceSplitRe.FindAllStringIndex(text, -1) {
+		if s := strings.TrimSpace(text[last:loc[1]]); s != "" {
+			out = append(out, s)
 		}
+		last = loc[1]
+	}
+	if s := strings.TrimSpace(text[last:]); s != "" {
+		out = append(out, s+".")
 	}
 	return out
 }
