@@ -76,7 +76,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0044](ISSUE-0044-m2-identity-audit-override.md) | Identity-decision audit log + agent manual override → human-verified | done | M2 | M | 0025, 0013 |
 | [0045](ISSUE-0045-m12-reservation-connector.md) | Reservation Connector Interface (10-method contract) + degraded mode + reference/generic/file-drop connectors + short-TTL cache | done | M12 | M | 0025 |
 | [0046](ISSUE-0046-m5-booking-personalization.md) | M5 booking-fact personalization + reservation-document attachment gated by verification level | done | M5 | M | 0045, 0021, 0039 |
-| [0047](ISSUE-0047-m4-knowledge-indexing.md) | Knowledge indexing: chunk/embed/index with full metadata + tenant/brand isolation + no-booking-data-in-index rule | todo | M4 | M | 0026 |
+| [0047](ISSUE-0047-m4-knowledge-indexing.md) | Knowledge indexing: chunk/embed/index with full metadata + tenant/brand isolation + no-booking-data-in-index rule | done | M4 | M | 0026 |
 | [0048](ISSUE-0048-m4-knowledge-sources.md) | Knowledge sources: website crawl (robots/change-detect) + document upload (layout-aware) + structured feeds | todo | M4 | M | 0047 |
 | [0049](ISSUE-0049-m4-canonical-browser-multilingual.md) | Canonical answers authored in-console + knowledge browser (search/usage/retire/review) + multilingual answering | todo | M4 | M | 0047, 0037 |
 | [0050](ISSUE-0050-m8-gap-mining.md) | Knowledge-gap mining (cluster abstain/low-conf/edited, rank by volume×cost) | todo | M8 | M | 0047, 0034 |
