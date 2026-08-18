@@ -6,402 +6,48 @@
 
 **Architecture:** A small, framework-light SPA in `./console/`. A typed `api/` client wraps fetch (injects `X-Tenant-ID` + bearer, maps status codes to typed errors); a `session/` React context holds tenant+token set by a dev session bar; `queue/` polls and claims; `review/` renders the three panes + keyboard action bar. No state library, no component kit, no CSS framework — React context + local state + a polling hook + a thin `ui/` token layer.
 
-**Tech Stack:** React 18, TypeScript 5, Vite 5, Vitest + @testing-library/react + jsdom, CSS modules + CSS custom-property tokens. No other runtime deps.
+**Tech Stack:** React 18, TypeScript 5, Vite 5, Vitest + @testing-library/react + jsdom, CSS modules + CSS custom-property tokens.
 
 **Spec:** `docs/superpowers/specs/2026-08-18-m7-agent-console-design.md`
 
 ## Global Constraints
 
-- **Location:** all code under `./console/` (ADR-0030 names the console `./console`). Do not modify `./backend` — if a field is missing, that is a separate backend issue, not a UI workaround.
+- **Location:** all code under `./console/`. Do not modify `./backend`.
 - **Stack floors (ADR-0030):** React + TypeScript + Vite. WCAG 2.2 AA: full keyboard operation, visible focus, AA contrast, citation highlight never colour-only.
-- **Auth/tenant:** every API call sends `X-Tenant-ID: <tenantId>` and `Authorization: Bearer <token>` from the session context (decision ①). Backend verifies HS256 and scopes by tenant.
-- **Live updates:** polling only (decision ②), default interval 5000 ms, revalidate after each mutation. No WebSocket/SSE.
-- **Draft editor:** plain `<textarea>` + citation overlay (decision ③). No rich-text library.
-- **Test-first:** every logic unit gets a failing Vitest test first (repo norm). Commit after each green task. No co-authored/signed-off trailers (repo rule).
-- **Field-name source of truth:** `src/api/types.ts` is the single place backend JSON shapes are pinned; reconcile against the Go `json:` tags in `backend/internal/queue/*.go` during Task 3.
+- **Auth/tenant:** every API call sends `X-Tenant-ID: <tenantId>` + `Authorization: Bearer <token>` from the session context (decision ①).
+- **Live updates:** polling only (decision ②), default 5000 ms, revalidate after each mutation.
+- **Draft editor:** plain `<textarea>` (decision ③). No rich-text library.
+- **Test-first:** every logic unit gets a failing Vitest test first. Commit after each green task. No co-authored/signed-off trailers. Run `npm test`, `npm run typecheck`, `npm run lint` green before every commit.
+- **WIRE TYPES ARE SNAKE_CASE AND FIXED BY TASK 3.** `src/api/types.ts` already exists and mirrors the real Go `json:` tags. Response objects are snake_case (`conversation_id`, `risk_class` [a **number**], `inline_citations`, `draft_available`, `evidence`, `reasons_for_agent`, …). Only the client-side `ActRequest` DTO is camelCase; `client.ts` maps it to the wire. Every screen below reads snake_case fields — do not reintroduce camelCase field access. The authoritative shapes are in `console/src/api/types.ts`; read it before writing any screen.
 
 ---
 
 ### Task 1: Scaffold the console app
 
-**Files:**
-- Create: `console/package.json`, `console/tsconfig.json`, `console/vite.config.ts`, `console/vitest.setup.ts`, `console/index.html`, `console/src/main.tsx`, `console/src/app/App.tsx`, `console/src/ui/tokens.css`, `console/.gitignore`, `console/README.md`
-- Test: `console/src/app/App.test.tsx`
-
-**Interfaces:**
-- Produces: a runnable Vite app whose root renders `<App/>`; `npm test`, `npm run build`, `npm run typecheck`, `npm run lint` scripts exist.
-
-- [ ] **Step 1: Create `console/package.json`**
-
-```json
-{
-  "name": "tourdesk-console",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "eslint src --max-warnings=0"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@testing-library/jest-dom": "^6.4.8",
-    "@testing-library/react": "^16.0.1",
-    "@testing-library/user-event": "^14.5.2",
-    "@types/react": "^18.3.5",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "eslint": "^9.9.1",
-    "jsdom": "^25.0.0",
-    "typescript": "^5.5.4",
-    "vite": "^5.4.3",
-    "vitest": "^2.0.5"
-  }
-}
-```
-
-- [ ] **Step 2: Create config files**
-
-`console/tsconfig.json`:
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"], "module": "ESNext",
-    "moduleResolution": "Bundler", "jsx": "react-jsx", "strict": true,
-    "noUnusedLocals": true, "noUnusedParameters": true, "esModuleInterop": true,
-    "skipLibCheck": true, "types": ["vitest/globals", "@testing-library/jest-dom"]
-  },
-  "include": ["src", "vitest.setup.ts"]
-}
-```
-`console/vite.config.ts`:
-```ts
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-export default defineConfig({
-  plugins: [react()],
-  server: { proxy: { "/queue": "http://localhost:8080", "/analytics": "http://localhost:8080" } },
-  test: { environment: "jsdom", globals: true, setupFiles: ["./vitest.setup.ts"] },
-} as any);
-```
-`console/vitest.setup.ts`:
-```ts
-import "@testing-library/jest-dom/vitest";
-```
-`console/index.html`:
-```html
-<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>TourDesk Console</title></head>
-<body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
-```
-`console/.gitignore`:
-```
-node_modules
-dist
-```
-
-- [ ] **Step 3: Write the failing test**
-
-`console/src/app/App.test.tsx`:
-```tsx
-import { render, screen } from "@testing-library/react";
-import { App } from "./App";
-test("renders the console shell heading", () => {
-  render(<App />);
-  expect(screen.getByRole("heading", { name: /tourdesk console/i })).toBeInTheDocument();
-});
-```
-
-- [ ] **Step 4: Run test to verify it fails**
-
-Run: `cd console && npm install && npm test`
-Expected: FAIL — cannot resolve `./App`.
-
-- [ ] **Step 5: Create tokens, App, and entrypoint**
-
-`console/src/ui/tokens.css`:
-```css
-:root {
-  --bg: #ffffff; --fg: #14161a; --muted: #5b6472; --line: #d7dce3;
-  --accent: #1f6feb; --danger: #b42318; --warn: #9a6700; --ok: #067647;
-  --focus: #1f6feb; --radius: 6px; --pane-gap: 12px;
-  font-family: system-ui, sans-serif; color: var(--fg); background: var(--bg);
-}
-*:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-@media (prefers-color-scheme: dark) {
-  :root { --bg:#0f1216; --fg:#e6e9ee; --muted:#9aa4b2; --line:#2a313b; }
-}
-```
-`console/src/app/App.tsx`:
-```tsx
-import "../ui/tokens.css";
-export function App() {
-  return (
-    <div>
-      <header><h1>TourDesk Console</h1></header>
-      <main>{/* router mounted in Task 7 */}</main>
-    </div>
-  );
-}
-```
-`console/src/main.tsx`:
-```tsx
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { App } from "./app/App";
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
-```
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `cd console && npm test`
-Expected: PASS. Also `npm run typecheck` → clean.
-
-- [ ] **Step 7: Write `console/README.md`** (dev-grade auth + polling recorded as intentional)
-
-```md
-# TourDesk Console (M7)
-React+TS+Vite console over the Go backend `/queue/*` APIs.
-- Dev: `npm install && npm run dev` (proxies /queue, /analytics to :8080).
-- Auth is dev-grade: paste/generate an HS256 bearer + tenant id in the session bar (decision ①).
-- Queue updates by polling every 5s (decision ②). Draft editor is plain-text (decision ③).
-- Production SSO redirect, real-time push, and rich-text are later slices.
-Test: `npm test`. Typecheck: `npm run typecheck`.
-```
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add console && git commit -m "feat(console): scaffold Vite+React+TS app shell (M7)"
-```
+**(COMPLETE — commit range 166b3c3..d621ec3.)** Vite+React+TS app under `console/`: `package.json` (scripts dev/build/typecheck/test/lint), tsconfig, `vite.config.ts` (imports `defineConfig` from `vitest/config`, jsdom test env), `vitest.setup.ts`, `index.html`, `src/main.tsx`, `src/app/App.tsx` (`<h1>TourDesk Console</h1>`), `src/ui/tokens.css`, `eslint.config.js` (typescript-eslint flat config), `.gitignore`, `README.md`. Left here for the record; do not re-run.
 
 ---
 
 ### Task 2: Session context + dev session bar
 
-**Files:**
-- Create: `console/src/session/SessionContext.tsx`, `console/src/session/SessionBar.tsx`
-- Test: `console/src/session/SessionContext.test.tsx`
-
-**Interfaces:**
-- Produces:
-  - `type Session = { tenantId: string; token: string }`
-  - `useSession(): { session: Session | null; setSession: (s: Session) => void; clear: () => void }`
-  - `<SessionProvider>` (wraps app; persists to `sessionStorage` key `td.session`)
-  - `<SessionBar/>` (inputs for tenant id + token, Save/Clear)
-
-- [ ] **Step 1: Write the failing test**
-
-```tsx
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { SessionProvider, useSession } from "./SessionContext";
-function Probe() {
-  const { session, setSession } = useSession();
-  return (<div>
-    <span data-testid="tenant">{session?.tenantId ?? "none"}</span>
-    <button onClick={() => setSession({ tenantId: "t1", token: "jwt" })}>set</button>
-  </div>);
-}
-test("stores and exposes the session", async () => {
-  render(<SessionProvider><Probe /></SessionProvider>);
-  expect(screen.getByTestId("tenant")).toHaveTextContent("none");
-  await userEvent.click(screen.getByText("set"));
-  expect(screen.getByTestId("tenant")).toHaveTextContent("t1");
-  expect(JSON.parse(sessionStorage.getItem("td.session")!).tenantId).toBe("t1");
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd console && npm test -- SessionContext`
-Expected: FAIL — cannot resolve `./SessionContext`.
-
-- [ ] **Step 3: Implement `SessionContext.tsx`**
-
-```tsx
-import { createContext, useContext, useMemo, useState, ReactNode } from "react";
-export type Session = { tenantId: string; token: string };
-type Ctx = { session: Session | null; setSession: (s: Session) => void; clear: () => void };
-const SessionCtx = createContext<Ctx | null>(null);
-const KEY = "td.session";
-function load(): Session | null { try { return JSON.parse(sessionStorage.getItem(KEY) ?? "null"); } catch { return null; } }
-export function SessionProvider({ children }: { children: ReactNode }) {
-  const [session, setS] = useState<Session | null>(load);
-  const value = useMemo<Ctx>(() => ({
-    session,
-    setSession: (s) => { sessionStorage.setItem(KEY, JSON.stringify(s)); setS(s); },
-    clear: () => { sessionStorage.removeItem(KEY); setS(null); },
-  }), [session]);
-  return <SessionCtx.Provider value={value}>{children}</SessionCtx.Provider>;
-}
-export function useSession(): Ctx {
-  const c = useContext(SessionCtx);
-  if (!c) throw new Error("useSession outside SessionProvider");
-  return c;
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `cd console && npm test -- SessionContext`
-Expected: PASS.
-
-- [ ] **Step 5: Implement `SessionBar.tsx`** (no test beyond the context; it is thin glue)
-
-```tsx
-import { useState } from "react";
-import { useSession } from "./SessionContext";
-export function SessionBar() {
-  const { session, setSession, clear } = useSession();
-  const [tenantId, setTenant] = useState(session?.tenantId ?? "");
-  const [token, setToken] = useState(session?.token ?? "");
-  return (
-    <form aria-label="dev session" onSubmit={(e) => { e.preventDefault(); setSession({ tenantId, token }); }}
-          style={{ display: "flex", gap: 8, alignItems: "center", padding: 8, borderBottom: "1px solid var(--line)" }}>
-      <label>Tenant <input value={tenantId} onChange={(e) => setTenant(e.target.value)} required /></label>
-      <label>Token <input value={token} onChange={(e) => setToken(e.target.value)} type="password" required style={{ width: 220 }} /></label>
-      <button type="submit">Save</button>
-      {session && <button type="button" onClick={clear}>Clear</button>}
-      {session && <span aria-live="polite" style={{ color: "var(--muted)" }}>tenant {session.tenantId}</span>}
-    </form>
-  );
-}
-```
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add console/src/session && git commit -m "feat(console): session context + dev session bar (decision ①)"
-```
+**(COMPLETE — commit b8de04d.)** `src/session/SessionContext.tsx` exports `type Session = { tenantId: string; token: string }`, `useSession()` → `{ session, setSession, clear }`, `<SessionProvider>` (sessionStorage key `td.session`); `src/session/SessionBar.tsx`. Do not re-run.
 
 ---
 
 ### Task 3: Typed API client + response types
 
-**Files:**
-- Create: `console/src/api/types.ts`, `console/src/api/client.ts`
-- Test: `console/src/api/client.test.ts`
-- Read (to reconcile field names): `backend/internal/queue/*.go` (`json:` tags on QueueItem / review surface / act result)
+**(COMPLETE — commit 1d46f76.)** `src/api/types.ts` + `src/api/client.ts` + `client.test.ts`. Types reconciled to the real backend wire (snake_case, `review.Surface` shape, 4 actions). Exports: types `Sla, QueueItem, Message, Citation, EvidenceSource, BookingPanel, GateCondition, AutonomyIndicator, TranslationView, ReviewSurface, ActionKind, ActRequest, ActResult`; `ApiError/PermissionError/ClaimConflict/MissingTenant`; `makeClient(getSession, fetchImpl?)` → `{ getQueue, claim, resolve, getReview, act }`; `type ApiClient`. Do not re-run. **Tasks 4–7 below were rewritten against these real types.**
 
-**Interfaces:**
-- Produces:
-  - Types: `QueueItem`, `Sla`, `ReviewSurface`, `Citation`, `BookingPanel`, `AutonomyIndicator`, `ActResult`, `ActionKind`.
-  - `class ApiError extends Error { status: number }`, plus `PermissionError`(403), `ClaimConflict`(409), `MissingTenant`(400) subclasses.
-  - `makeClient(getSession: () => Session | null)` → `{ getQueue(), claim(id), resolve(id), getReview(id), act(req) }` returning typed promises.
-
-- [ ] **Step 1: Reconcile field names**
-
-Open `backend/internal/queue/queue.go`, `review.go`, `act.go`; note the exact `json:` tags. If any differ from the shapes below (e.g. `conversation_id` vs `conversationId`), adjust `types.ts` to match the Go tags. The shapes below reflect the reported backend design; the Go tags are authoritative.
-
-- [ ] **Step 2: Write `types.ts`**
-
-```ts
-export type Sla = { defined: boolean; targetAt?: string; remainingSecs: number; windowSecs: number; breached: boolean };
-export type QueueItem = {
-  conversationId: string; score: number; riskClass: string; intent: string; channel: string;
-  enqueuedAt: string; departureAt?: string; sla: Sla; locked: boolean; claimedBy?: string; status: string; queue: string;
-};
-export type Citation = { claimSpan: string; knowledgeItemId?: string; bookingFieldPath?: string; score?: number };
-export type BookingPanel = { available: boolean; reason?: string; fields?: Record<string, string> };
-export type AutonomyIndicator = { level: string; autoSendEligible: boolean; confidenceBand?: string; reasonsForAgent: string[] };
-export type ReviewSurface = {
-  conversationId: string; customerThread: { from: string; sentAt: string; body: string }[];
-  draftBody: string | null; abstainReason?: string; citations: Citation[];
-  evidenceSources: { id: string; title: string; snippet: string }[];
-  booking: BookingPanel; autonomy: AutonomyIndicator;
-  translation: { mtAvailable: boolean; customerLanguage: string; draftLanguage: string };
-};
-export type ActionKind = "approve_send" | "edit_send" | "reject" | "escalate" | "snooze" | "reassign" | "mark_spam" | "request_info";
-export type ActRequest = { conversationId: string; agent: string; action: ActionKind; editedBody?: string };
-export type ActResult = { action: ActionKind; sent: boolean; message?: string };
-```
-
-- [ ] **Step 3: Write the failing test**
-
-```ts
-import { makeClient, ClaimConflict, MissingTenant } from "./client";
-const session = { tenantId: "t1", token: "jwt" };
-function stubFetch(status: number, body: unknown) {
-  return async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-}
-test("getQueue returns items and sends auth headers", async () => {
-  let seen: Request | undefined;
-  const fetchImpl = async (input: any, init: any) => { seen = new Request(input, init); return new Response(JSON.stringify({ items: [{ conversationId: "c1" }] }), { status: 200 }); };
-  const c = makeClient(() => session, fetchImpl as any);
-  const items = await c.getQueue();
-  expect(items[0].conversationId).toBe("c1");
-  expect(seen!.headers.get("X-Tenant-ID")).toBe("t1");
-  expect(seen!.headers.get("Authorization")).toBe("Bearer jwt");
-});
-test("claim maps 409 to ClaimConflict", async () => {
-  const c = makeClient(() => session, stubFetch(409, { error: "claimed" }) as any);
-  await expect(c.claim("c1")).rejects.toBeInstanceOf(ClaimConflict);
-});
-test("missing session throws MissingTenant before fetch", async () => {
-  const c = makeClient(() => null, stubFetch(200, {}) as any);
-  await expect(c.getQueue()).rejects.toBeInstanceOf(MissingTenant);
-});
-```
-
-- [ ] **Step 4: Run test to verify it fails**
-
-Run: `cd console && npm test -- api/client`
-Expected: FAIL — cannot resolve `./client`.
-
-- [ ] **Step 5: Implement `client.ts`**
-
-```ts
-import type { Session } from "../session/SessionContext";
-import type { QueueItem, ReviewSurface, ActRequest, ActResult } from "./types";
-export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
-export class PermissionError extends ApiError {}
-export class ClaimConflict extends ApiError {}
-export class MissingTenant extends ApiError {}
-type FetchImpl = typeof fetch;
-export function makeClient(getSession: () => Session | null, fetchImpl: FetchImpl = fetch) {
-  async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const s = getSession();
-    if (!s?.tenantId || !s?.token) throw new MissingTenant(400, "no session");
-    const res = await fetchImpl(path, {
-      method,
-      headers: { "X-Tenant-ID": s.tenantId, "Authorization": `Bearer ${s.token}`, "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (res.status === 403) throw new PermissionError(403, "insufficient role");
-    if (res.status === 409) throw new ClaimConflict(409, "already claimed");
-    if (res.status === 400) throw new MissingTenant(400, "missing tenant/bad request");
-    if (!res.ok) throw new ApiError(res.status, `request failed (${res.status})`);
-    return (res.status === 204 ? undefined : await res.json()) as T;
-  }
-  return {
-    getQueue: async (): Promise<QueueItem[]> => (await call<{ items: QueueItem[] }>("GET", "/queue")).items ?? [],
-    claim: (conversationId: string, agent = "me") => call<{ expires_at: string }>("POST", "/queue/claim", { conversation_id: conversationId, agent }),
-    resolve: (conversationId: string, agent = "me") => call<void>("POST", "/queue/resolve", { conversation_id: conversationId, agent }),
-    getReview: (conversationId: string) => call<ReviewSurface>("GET", `/queue/review?conversation_id=${encodeURIComponent(conversationId)}`),
-    act: (req: ActRequest) => call<ActResult>("POST", "/queue/act", { conversation_id: req.conversationId, agent: req.agent, action: req.action, edited_body: req.editedBody }),
-  };
-}
-export type ApiClient = ReturnType<typeof makeClient>;
-```
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `cd console && npm test -- api/client`
-Expected: PASS (3 tests).
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add console/src/api && git commit -m "feat(console): typed API client + response types + error mapping"
-```
+Reference shapes (from `types.ts` — the source of truth):
+- `QueueItem`: `conversation_id, score, risk_class (number), intent?, channel?, enqueued_at, departure_at?, sla, status, queue, locked, claimed_by?`; `Sla`: `defined, target_at?, remaining_secs, window_secs?, breached`.
+- `ReviewSurface`: `conversation_id, customer_message: Message, thread: Message[], draft_available, draft, draft_language?, draft_status?, inline_citations: Citation[], unsupported_claims?: string[], evidence: EvidenceSource[], booking: BookingPanel, autonomy: AutonomyIndicator, translation`.
+- `Message`: `from, direction, subject?, body, automated` (NO timestamp).
+- `Citation`: `claim_span, knowledge_item_id?, booking_field_path?, score?, resolved`.
+- `EvidenceSource`: `id, title?, url?, score?` (NO snippet).
+- `BookingPanel`: `available, withheld, reason?, ref?, status?, destination?, dates?: string[], payment_status?, balance_due?, accommodation?, transport?`.
+- `AutonomyIndicator`: `present, outcome?, route?, auto_send_eligible, confidence_band?, conditions?: GateCondition[], reasons_for_agent?: string[]` (NO `level`). `GateCondition`: `ID, Pass, Detail`.
+- `ActionKind`: `"approve_send" | "edit_send" | "reject" | "escalate"` (only these 4).
+- `ActRequest` (camelCase DTO): `conversationId, agent, action, editedBody?, targetQueue?, reason?, reasonCode?, comment?`. `ActResult`: `action, sent?, already_sent?, sent_message_id?, escalated?, rejected?`.
 
 ---
 
@@ -412,27 +58,27 @@ git add console/src/api && git commit -m "feat(console): typed API client + resp
 - Test: `console/src/queue/QueueScreen.test.tsx`
 
 **Interfaces:**
-- Consumes: `ApiClient` (Task 3), `useSession` (Task 2).
-- Produces: `<QueueScreen client={ApiClient} onOpen={(id: string) => void} />`; `usePolling(fn, ms, deps)`.
+- Consumes: `ApiClient` (Task 3), `QueueItem` (snake_case).
+- Produces: `<QueueScreen client={ApiClient} onOpen={(id: string) => void} />`; `usePolling(fn, ms)`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test** (`QueueScreen.test.tsx`)
 
 ```tsx
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueueScreen } from "./QueueScreen";
 import { ClaimConflict } from "../api/client";
-const items = [
-  { conversationId: "c1", score: 9, riskClass: "R1", intent: "faq", channel: "email", enqueuedAt: "", sla: { defined: true, remainingSecs: -60, windowSecs: 3600, breached: true }, locked: false, status: "pending", queue: "normal" },
-  { conversationId: "c2", score: 3, riskClass: "R0", intent: "faq", channel: "email", enqueuedAt: "", sla: { defined: true, remainingSecs: 1800, windowSecs: 3600, breached: false }, locked: false, status: "pending", queue: "normal" },
+import type { QueueItem } from "../api/types";
+const items: QueueItem[] = [
+  { conversation_id: "c1", score: 9, risk_class: 1, intent: "faq", channel: "email", enqueued_at: "", sla: { defined: true, remaining_secs: -60, window_secs: 3600, breached: true }, locked: false, status: "pending", queue: "normal" },
+  { conversation_id: "c2", score: 3, risk_class: 0, intent: "faq", channel: "email", enqueued_at: "", sla: { defined: true, remaining_secs: 1800, window_secs: 3600, breached: false }, locked: false, status: "pending", queue: "normal" },
 ];
 function client(overrides = {}) {
-  return { getQueue: async () => items, claim: async () => ({ expires_at: "" }), resolve: async () => {}, getReview: async () => ({} as any), act: async () => ({} as any), ...overrides } as any;
+  return { getQueue: async () => items, claim: async () => ({ expires_at: "" }), resolve: async () => ({ resolved: true }), getReview: async () => ({} as any), act: async () => ({} as any), ...overrides } as any;
 }
 test("renders rows ordered by score with a breach badge", async () => {
   render(<QueueScreen client={client()} onOpen={() => {}} />);
   const rows = await screen.findAllByRole("row");
-  // header + 2 data rows; first data row is highest score c1 and shows breach
   expect(within(rows[1]).getByText("c1")).toBeInTheDocument();
   expect(within(rows[1]).getByText(/breach/i)).toBeInTheDocument();
 });
@@ -446,10 +92,7 @@ test("claim conflict shows a message and does not open", async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd console && npm test -- QueueScreen`
-Expected: FAIL — cannot resolve `./QueueScreen`.
+- [ ] **Step 2: Run test to verify it fails** — `cd console && npm test -- QueueScreen` → FAIL (cannot resolve `./QueueScreen`).
 
 - [ ] **Step 3: Implement `usePolling.ts`**
 
@@ -471,7 +114,7 @@ export function usePolling<T>(fn: () => Promise<T>, ms: number): { data: T | nul
 }
 ```
 
-- [ ] **Step 4: Implement `QueueScreen.tsx`**
+- [ ] **Step 4: Implement `QueueScreen.tsx`** (snake_case fields; `risk_class` is a number rendered `R{n}`)
 
 ```tsx
 import { useState } from "react";
@@ -493,12 +136,12 @@ export function QueueScreen({ client, onOpen }: { client: ApiClient; onOpen: (id
       <table><thead><tr><th>Case</th><th>Score</th><th>Risk</th><th>Intent</th><th>SLA</th><th></th></tr></thead>
         <tbody>
           {rows.map((it) => (
-            <tr key={it.conversationId}>
-              <td>{it.conversationId}</td><td>{it.score.toFixed(1)}</td><td>{it.riskClass}</td><td>{it.intent}</td>
+            <tr key={it.conversation_id}>
+              <td>{it.conversation_id}</td><td>{it.score.toFixed(1)}</td><td>{`R${it.risk_class}`}</td><td>{it.intent ?? "—"}</td>
               <td>{it.sla.breached
                 ? <span style={{ color: "var(--danger)", fontWeight: 600 }}>⚠ breach</span>
-                : it.sla.defined ? `${Math.round(it.sla.remainingSecs / 60)}m` : "—"}</td>
-              <td><button onClick={() => claim(it.conversationId)} aria-label={`claim ${it.conversationId}`}>Claim</button></td>
+                : it.sla.defined ? `${Math.round(it.sla.remaining_secs / 60)}m` : "—"}</td>
+              <td><button onClick={() => claim(it.conversation_id)} aria-label={`claim ${it.conversation_id}`}>Claim</button></td>
             </tr>
           ))}
         </tbody>
@@ -508,12 +151,8 @@ export function QueueScreen({ client, onOpen }: { client: ApiClient; onOpen: (id
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
-
-Run: `cd console && npm test -- QueueScreen`
-Expected: PASS (2 tests).
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Run tests** — `cd console && npm test -- QueueScreen` → PASS (2).
+- [ ] **Step 6: Gates + commit** — `npm test && npm run typecheck && npm run lint` green, then:
 
 ```bash
 git add console/src/queue && git commit -m "feat(console): queue screen — polling, scored rows, SLA breach, claim 409"
@@ -528,52 +167,57 @@ git add console/src/queue && git commit -m "feat(console): queue screen — poll
 - Test: `console/src/review/EvidencePane.test.tsx`, `console/src/review/ReviewScreen.test.tsx`
 
 **Interfaces:**
-- Consumes: `ApiClient.getReview` (Task 3), types from `api/types`.
-- Produces: `<ReviewScreen client={ApiClient} conversationId={string} agent={string} onDone={() => void} />`; `<EvidencePane surface={ReviewSurface} highlighted={string|null} />`.
+- Consumes: `ApiClient.getReview`, `ReviewSurface`/`Message`/`BookingPanel`/`AutonomyIndicator` (snake_case).
+- Produces: `<ReviewScreen client conversationId agent onDone />`; `<EvidencePane surface={ReviewSurface} />`; `<ThreadPane customerMessage={Message} thread={Message[]} />`.
 
-- [ ] **Step 1: Write the failing test for EvidencePane**
+Notes on the real shape (gaps handled, not faked): messages have **no timestamp** (show `from` + `direction`); evidence sources have **no snippet** (show `title`/`url`); autonomy has **no `level`** (show `outcome`/`route`); the draft is `draft_available` (bool) + `draft` (string) + `draft_status` (the abstain reason when unavailable).
+
+- [ ] **Step 1: Write the failing test** (`EvidencePane.test.tsx`)
 
 ```tsx
 import { render, screen } from "@testing-library/react";
 import { EvidencePane } from "./EvidencePane";
-const surface = {
-  conversationId: "c1", customerThread: [], draftBody: "You depart 09:00.", abstainReason: undefined,
-  citations: [{ claimSpan: "You depart 09:00.", bookingFieldPath: "itinerary.departure" }],
-  evidenceSources: [{ id: "k1", title: "FAQ", snippet: "..." }],
-  booking: { available: false, reason: "connector down" },
-  autonomy: { level: "L1", autoSendEligible: false, reasonsForAgent: ["G05 confidence below threshold"] },
-  translation: { mtAvailable: false, customerLanguage: "", draftLanguage: "en" },
-} as any;
+import type { ReviewSurface } from "../api/types";
+const surface: ReviewSurface = {
+  conversation_id: "c1", customer_message: { from: "cust@x", direction: "inbound", body: "When do I depart?", automated: false }, thread: [],
+  draft_available: true, draft: "You depart 09:00.", inline_citations: [{ claim_span: "You depart 09:00.", booking_field_path: "itinerary.departure", resolved: true }],
+  evidence: [{ id: "k1", title: "FAQ" }],
+  booking: { available: false, withheld: false, reason: "connector down" },
+  autonomy: { present: true, outcome: "human_review", route: "review", auto_send_eligible: false, reasons_for_agent: ["G05 confidence below threshold"] },
+  translation: { original_message: "", draft: "", mt_available: false },
+};
 test("shows degraded booking and the autonomy reasons", () => {
-  render(<EvidencePane surface={surface} highlighted={null} />);
+  render(<EvidencePane surface={surface} />);
   expect(screen.getByText(/booking data unavailable/i)).toBeInTheDocument();
   expect(screen.getByText(/G05 confidence below threshold/)).toBeInTheDocument();
 });
 test("renders a source list", () => {
-  render(<EvidencePane surface={surface} highlighted={null} />);
+  render(<EvidencePane surface={surface} />);
   expect(screen.getByText("FAQ")).toBeInTheDocument();
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd console && npm test -- EvidencePane`
-Expected: FAIL — cannot resolve `./EvidencePane`.
+- [ ] **Step 2: Run test to verify it fails** — `npm test -- EvidencePane` → FAIL.
 
 - [ ] **Step 3: Implement `ThreadPane.tsx` and `EvidencePane.tsx`**
 
 `ThreadPane.tsx`:
 ```tsx
-import type { ReviewSurface } from "../api/types";
-export function ThreadPane({ thread }: { thread: ReviewSurface["customerThread"] }) {
+import type { Message } from "../api/types";
+function Msg({ m }: { m: Message }) {
+  return (
+    <article style={{ borderBottom: "1px solid var(--line)", padding: 8 }}>
+      <div style={{ color: "var(--muted)", fontSize: 12 }}>{m.from} · {m.direction}{m.automated ? " · auto" : ""}</div>
+      {m.subject && <div style={{ fontWeight: 600 }}>{m.subject}</div>}
+      <div>{m.body}</div>
+    </article>
+  );
+}
+export function ThreadPane({ customerMessage, thread }: { customerMessage: Message; thread: Message[] }) {
   return (
     <div aria-label="customer thread" style={{ overflow: "auto" }}>
-      {thread.length === 0 ? <p style={{ color: "var(--muted)" }}>No prior messages.</p>
-        : thread.map((m, i) => (
-          <article key={i} style={{ borderBottom: "1px solid var(--line)", padding: 8 }}>
-            <div style={{ color: "var(--muted)", fontSize: 12 }}>{m.from} · {m.sentAt}</div>
-            <div>{m.body}</div>
-          </article>))}
+      <Msg m={customerMessage} />
+      {thread.map((m, i) => <Msg key={i} m={m} />)}
     </div>
   );
 }
@@ -581,53 +225,53 @@ export function ThreadPane({ thread }: { thread: ReviewSurface["customerThread"]
 `EvidencePane.tsx`:
 ```tsx
 import type { ReviewSurface } from "../api/types";
-export function EvidencePane({ surface, highlighted }: { surface: ReviewSurface; highlighted: string | null }) {
-  const { booking, autonomy, evidenceSources, citations } = surface;
+export function EvidencePane({ surface }: { surface: ReviewSurface }) {
+  const { booking, autonomy, evidence } = surface;
   return (
     <aside aria-label="evidence" style={{ overflow: "auto", display: "grid", gap: "var(--pane-gap)" }}>
       <section aria-label="autonomy">
-        <h3>Autonomy — {autonomy.level}{autonomy.confidenceBand ? ` · ${autonomy.confidenceBand}` : ""}</h3>
-        {autonomy.autoSendEligible ? <p>Auto-send eligible.</p>
-          : <ul>{autonomy.reasonsForAgent.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+        <h3>Autonomy{autonomy.outcome ? ` — ${autonomy.outcome}` : ""}{autonomy.confidence_band ? ` · ${autonomy.confidence_band}` : ""}</h3>
+        {autonomy.auto_send_eligible
+          ? <p>Auto-send eligible.</p>
+          : <ul>{(autonomy.reasons_for_agent ?? []).map((r, i) => <li key={i}>{r}</li>)}</ul>}
       </section>
       <section aria-label="booking">
         <h3>Booking</h3>
         {booking.available
-          ? <dl>{Object.entries(booking.fields ?? {}).map(([k, v]) => <div key={k}><dt style={{ color: "var(--muted)" }}>{k}</dt><dd>{v}</dd></div>)}</dl>
+          ? <dl>{([["ref", booking.ref], ["status", booking.status], ["destination", booking.destination], ["dates", booking.dates?.join(" – ")], ["payment", booking.payment_status], ["balance", booking.balance_due], ["accommodation", booking.accommodation], ["transport", booking.transport]] as const)
+              .filter(([, v]) => v).map(([k, v]) => <div key={k}><dt style={{ color: "var(--muted)" }}>{k}</dt><dd>{v}</dd></div>)}</dl>
           : <p style={{ color: "var(--muted)" }}>booking data unavailable{booking.reason ? ` (${booking.reason})` : ""}</p>}
+        {booking.available && booking.withheld && <p style={{ color: "var(--warn)" }}>Some details withheld pending verification.</p>}
       </section>
       <section aria-label="sources">
         <h3>Cited sources</h3>
-        <ul>{evidenceSources.map((s) => {
-          const cited = citations.some((c) => c.knowledgeItemId === s.id);
-          return <li key={s.id} style={cited && highlighted && s.id === highlighted ? { background: "var(--warn)", color: "#fff" } : undefined}>{s.title}</li>;
-        })}</ul>
+        {evidence.length === 0 ? <p style={{ color: "var(--muted)" }}>none</p>
+          : <ul>{evidence.map((s) => <li key={s.id}>{s.title ?? s.id}{s.url ? ` — ${s.url}` : ""}</li>)}</ul>}
       </section>
     </aside>
   );
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test** — `npm test -- EvidencePane` → PASS (2).
 
-Run: `cd console && npm test -- EvidencePane`
-Expected: PASS (2 tests).
-
-- [ ] **Step 5: Write the failing test for ReviewScreen (abstain fallback)**
+- [ ] **Step 5: Write the failing test for ReviewScreen (abstain fallback)** (`ReviewScreen.test.tsx`)
 
 ```tsx
 import { render, screen } from "@testing-library/react";
 import { ReviewScreen } from "./ReviewScreen";
-function client(surface: any) { return { getReview: async () => surface, act: async () => ({}) } as any; }
-test("shows abstained reason when there is no draft", async () => {
-  const s = { conversationId: "c1", customerThread: [], draftBody: null, abstainReason: "escalated: hard-stop",
-    citations: [], evidenceSources: [], booking: { available: false }, autonomy: { level: "L0", autoSendEligible: false, reasonsForAgent: [] }, translation: { mtAvailable: false, customerLanguage: "", draftLanguage: "" } };
+import type { ReviewSurface } from "../api/types";
+function client(surface: ReviewSurface) { return { getReview: async () => surface, act: async () => ({ action: "approve_send" }) } as any; }
+test("shows the draft_status when there is no draft", async () => {
+  const s: ReviewSurface = { conversation_id: "c1", customer_message: { from: "c", direction: "inbound", body: "hi", automated: false }, thread: [],
+    draft_available: false, draft: "", draft_status: "abstained_or_escalated",
+    inline_citations: [], evidence: [], booking: { available: false, withheld: false }, autonomy: { present: false, auto_send_eligible: false }, translation: { original_message: "", draft: "", mt_available: false } };
   render(<ReviewScreen client={client(s)} conversationId="c1" agent="me" onDone={() => {}} />);
-  expect(await screen.findByText(/escalated: hard-stop/)).toBeInTheDocument();
+  expect(await screen.findByText(/abstained_or_escalated/)).toBeInTheDocument();
 });
 ```
 
-- [ ] **Step 6: Implement `ReviewScreen.tsx`** (loads the surface; renders 3 panes; draft/actions arrive in Task 6 — this task renders the abstain fallback + panes, and a placeholder action region)
+- [ ] **Step 6: Implement `ReviewScreen.tsx`** (draft region placeholder; DraftEditor+ActionBar mounted in Task 6)
 
 ```tsx
 import { useEffect, useState } from "react";
@@ -643,25 +287,21 @@ export function ReviewScreen({ client, conversationId, agent, onDone }: { client
   if (!surface) return <p>Loading…</p>;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: "var(--pane-gap)", height: "100%" }}>
-      <ThreadPane thread={surface.customerThread} />
+      <ThreadPane customerMessage={surface.customer_message} thread={surface.thread} />
       <div aria-label="draft">
-        {surface.draftBody === null
-          ? <p role="status" style={{ color: "var(--warn)" }}>{surface.abstainReason ?? "abstained / escalated"}</p>
-          : <div data-testid="draft-region">{/* DraftEditor + ActionBar mounted in Task 6 */}{surface.draftBody}</div>}
+        {!surface.draft_available
+          ? <p role="status" style={{ color: "var(--warn)" }}>{surface.draft_status ?? "abstained / escalated"}</p>
+          : <div data-testid="draft-region">{surface.draft}</div>}
       </div>
-      <EvidencePane surface={surface} highlighted={null} />
+      <EvidencePane surface={surface} />
       <button onClick={onDone} style={{ position: "absolute", right: 8, top: 8 }}>Back to queue</button>
     </div>
   );
 }
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
-
-Run: `cd console && npm test -- review`
-Expected: PASS.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Run tests** — `npm test -- review` → PASS.
+- [ ] **Step 8: Gates + commit**
 
 ```bash
 git add console/src/review && git commit -m "feat(console): review thread + evidence panes (citations, booking, autonomy, abstain fallback)"
@@ -677,10 +317,10 @@ git add console/src/review && git commit -m "feat(console): review thread + evid
 - Test: `console/src/review/ActionBar.test.tsx`, `console/src/review/DraftEditor.test.tsx`
 
 **Interfaces:**
-- Consumes: `ApiClient.act` (Task 3), `ReviewSurface` (Task 3).
-- Produces: `<DraftEditor value onChange citations />`; `<ActionBar onAct={(action: ActionKind) => void} busy />` with key bindings (a=approve_send, e=edit_send, x=escalate, r=reject).
+- Consumes: `ApiClient.act`, `ReviewSurface`, `Citation`, `ActionKind` (the 4 real actions).
+- Produces: `<DraftEditor value onChange unsupported={string[]} />`; `<ActionBar onAct={(a: ActionKind) => void} busy />` with keys a=approve_send, e=edit_send, x=escalate, r=reject.
 
-- [ ] **Step 1: Write the failing test for ActionBar (keyboard triggers act)**
+- [ ] **Step 1: Write the failing test for ActionBar** (`ActionBar.test.tsx`)
 
 ```tsx
 import { render, screen } from "@testing-library/react";
@@ -700,24 +340,21 @@ test("clicking Escalate fires escalate", async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd console && npm test -- ActionBar`
-Expected: FAIL — cannot resolve `./ActionBar`.
+- [ ] **Step 2: Run test to verify it fails** — `npm test -- ActionBar` → FAIL.
 
 - [ ] **Step 3: Implement `ActionBar.tsx` and `DraftEditor.tsx`**
 
-`ActionBar.tsx`:
+`ActionBar.tsx` (only the 4 real actions):
 ```tsx
 import { useEffect } from "react";
 import type { ActionKind } from "../api/types";
 const KEYS: Record<string, ActionKind> = { a: "approve_send", e: "edit_send", x: "escalate", r: "reject" };
-const LABEL: Record<ActionKind, string> = { approve_send: "Approve & send (a)", edit_send: "Edit & send (e)", escalate: "Escalate (x)", reject: "Reject (r)", snooze: "Snooze", reassign: "Reassign", mark_spam: "Mark spam", request_info: "Request info" };
+const LABEL: Record<ActionKind, string> = { approve_send: "Approve & send (a)", edit_send: "Edit & send (e)", escalate: "Escalate (x)", reject: "Reject (r)" };
 export function ActionBar({ onAct, busy }: { onAct: (a: ActionKind) => void; busy: boolean }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "TEXTAREA" || tag === "INPUT") return; // don't hijack typing
+      if (tag === "TEXTAREA" || tag === "INPUT") return;
       const a = KEYS[e.key.toLowerCase()];
       if (a && !busy) { e.preventDefault(); onAct(a); }
     }
@@ -733,49 +370,46 @@ export function ActionBar({ onAct, busy }: { onAct: (a: ActionKind) => void; bus
   );
 }
 ```
-`DraftEditor.tsx`:
+`DraftEditor.tsx` (uses the wire's `unsupported_claims`):
 ```tsx
-import type { Citation } from "../api/types";
-export function DraftEditor({ value, onChange, citations }: { value: string; onChange: (v: string) => void; citations: Citation[] }) {
-  const uncited = value.trim().length > 0 && citations.length === 0;
+export function DraftEditor({ value, onChange, unsupported }: { value: string; onChange: (v: string) => void; unsupported: string[] }) {
   return (
     <div style={{ display: "grid", gap: 4 }}>
-      {uncited && <p role="status" style={{ color: "var(--warn)" }}>⚠ No citations — sentences are unsupported.</p>}
+      {unsupported.length > 0 && <p role="status" style={{ color: "var(--warn)" }}>⚠ {unsupported.length} unsupported claim(s): {unsupported.join("; ")}</p>}
       <textarea aria-label="draft reply" value={value} onChange={(e) => onChange(e.target.value)} rows={16} style={{ width: "100%", fontFamily: "inherit" }} />
     </div>
   );
 }
 ```
 
-- [ ] **Step 4: Write the DraftEditor test**
+- [ ] **Step 4: Write the DraftEditor test** (`DraftEditor.test.tsx`)
 
 ```tsx
 import { render, screen } from "@testing-library/react";
 import { DraftEditor } from "./DraftEditor";
-test("warns when a non-empty draft has no citations", () => {
-  render(<DraftEditor value="Hello." onChange={() => {}} citations={[]} />);
-  expect(screen.getByText(/unsupported/i)).toBeInTheDocument();
+test("warns when there are unsupported claims", () => {
+  render(<DraftEditor value="Hello." onChange={() => {}} unsupported={["Hello."]} />);
+  expect(screen.getByText(/unsupported claim/i)).toBeInTheDocument();
 });
 ```
 
-- [ ] **Step 5: Wire them into `ReviewScreen.tsx` draft region**
+- [ ] **Step 5: Wire them into `ReviewScreen.tsx`** — replace the `data-testid="draft-region"` block with `<DraftRegion client={client} surface={surface} agent={agent} onDone={onDone} />`, add imports (`useState`, `DraftEditor`, `ActionBar`, `ActionKind`), and append this component:
 
-Replace the `data-testid="draft-region"` block with:
-```tsx
-<DraftRegion client={client} surface={surface} agent={agent} onDone={onDone} />
-```
-and add this component at the bottom of `ReviewScreen.tsx` (imports: `useState`, `DraftEditor`, `ActionBar`, `ActionKind`, `ClaimConflict`/`ApiError`):
 ```tsx
 function DraftRegion({ client, surface, agent, onDone }: { client: ApiClient; surface: ReviewSurface; agent: string; onDone: () => void }) {
-  const [body, setBody] = useState(surface.draftBody ?? "");
+  const [body, setBody] = useState(surface.draft ?? "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   async function act(action: ActionKind) {
     setBusy(true); setMsg(null);
     try {
-      const edited = action === "edit_send" ? body : undefined;
-      const r = await client.act({ conversationId: surface.conversationId, agent, action, editedBody: edited });
-      setMsg(r.sent ? "sent" : (r.message ?? "done"));
+      const r = await client.act({
+        conversationId: surface.conversation_id, agent, action,
+        editedBody: action === "edit_send" ? body : undefined,
+        targetQueue: action === "escalate" ? "specialist" : undefined,   // backend 400s escalate without target_queue
+        reason: action === "reject" ? "rejected by agent" : action === "escalate" ? "escalated by agent" : undefined,
+      });
+      setMsg(r.sent || r.already_sent ? "sent" : r.escalated ? "escalated" : r.rejected ? "rejected" : "done");
       onDone();
     } catch (e) {
       setMsg(e instanceof Error && e.message.includes("503") ? "sending unavailable — escalate instead" : "action failed");
@@ -783,21 +417,17 @@ function DraftRegion({ client, surface, agent, onDone }: { client: ApiClient; su
   }
   return (<div>
     {msg && <p role="status">{msg}</p>}
-    <DraftEditor value={body} onChange={setBody} citations={surface.citations} />
+    <DraftEditor value={body} onChange={setBody} unsupported={surface.unsupported_claims ?? []} />
     <ActionBar onAct={act} busy={busy} />
   </div>);
 }
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
-
-Run: `cd console && npm test -- review`
-Expected: PASS (ActionBar + DraftEditor + prior review tests).
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Run tests** — `npm test -- review` → PASS.
+- [ ] **Step 7: Gates + commit**
 
 ```bash
-git add console/src/review && git commit -m "feat(console): draft editor + keyboard action bar wired to /queue/act (G14 respected server-side)"
+git add console/src/review && git commit -m "feat(console): draft editor + keyboard action bar wired to /queue/act"
 ```
 
 ---
@@ -805,26 +435,26 @@ git add console/src/review && git commit -m "feat(console): draft editor + keybo
 ### Task 7: App router, session gate, accessibility pass, smoke test
 
 **Files:**
-- Modify: `console/src/app/App.tsx` (router: session gate → queue ⇄ review, mount SessionBar)
+- Modify: `console/src/app/App.tsx` (router: session gate → queue ⇄ review, mount SessionBar), `console/src/app/App.test.tsx` (wrap already handled by App internally)
 - Create: `console/src/app/App.smoke.test.tsx`
-- Modify: `console/src/app/App.test.tsx` (wrap in SessionProvider)
 
-**Interfaces:**
-- Consumes: everything above.
-- Produces: a complete app: no session → SessionBar prompt; session → QueueScreen; open → ReviewScreen; back → QueueScreen.
+**Interfaces:** consumes everything above; produces the complete app: no session → prompt; session → QueueScreen; open → ReviewScreen; back → QueueScreen.
 
-- [ ] **Step 1: Write the failing smoke test**
+- [ ] **Step 1: Write the failing smoke test** (`App.smoke.test.tsx`, snake_case surface fixture)
 
 ```tsx
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App";
+import type { ReviewSurface } from "../api/types";
 test("with a session, shows the queue and opens a case", async () => {
+  const surface: ReviewSurface = { conversation_id: "c1", customer_message: { from: "c", direction: "inbound", body: "hi", automated: false }, thread: [],
+    draft_available: true, draft: "Hi there.", inline_citations: [], evidence: [], booking: { available: false, withheld: false },
+    autonomy: { present: true, auto_send_eligible: false }, translation: { original_message: "", draft: "", mt_available: false } };
   const client = {
-    getQueue: async () => [{ conversationId: "c1", score: 5, riskClass: "R0", intent: "faq", channel: "email", enqueuedAt: "", sla: { defined: false, remainingSecs: 0, windowSecs: 0, breached: false }, locked: false, status: "pending", queue: "normal" }],
-    claim: async () => ({ expires_at: "" }), resolve: async () => {},
-    getReview: async () => ({ conversationId: "c1", customerThread: [], draftBody: "Hi.", citations: [], evidenceSources: [], booking: { available: false }, autonomy: { level: "L1", autoSendEligible: false, reasonsForAgent: [] }, translation: { mtAvailable: false, customerLanguage: "", draftLanguage: "en" } }),
-    act: async () => ({ action: "approve_send", sent: true }),
+    getQueue: async () => [{ conversation_id: "c1", score: 5, risk_class: 0, enqueued_at: "", sla: { defined: false, remaining_secs: 0, breached: false }, locked: false, status: "pending", queue: "normal" }],
+    claim: async () => ({ expires_at: "" }), resolve: async () => ({ resolved: true }),
+    getReview: async () => surface, act: async () => ({ action: "approve_send", sent: true }),
   } as any;
   sessionStorage.setItem("td.session", JSON.stringify({ tenantId: "t1", token: "jwt" }));
   render(<App client={client} />);
@@ -833,10 +463,7 @@ test("with a session, shows the queue and opens a case", async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd console && npm test -- App.smoke`
-Expected: FAIL — `App` does not accept `client`, no routing.
+- [ ] **Step 2: Run test to verify it fails** — `npm test -- App.smoke` → FAIL (App takes no `client`, no routing).
 
 - [ ] **Step 3: Implement routing in `App.tsx`**
 
@@ -862,41 +489,21 @@ function Shell({ client }: { client: ApiClient }) {
     </div>
   );
 }
-export function App({ client }: { client?: ApiClient }) {
-  return (
-    <SessionProvider>
-      <AppInner client={client} />
-    </SessionProvider>
-  );
-}
 function AppInner({ client }: { client?: ApiClient }) {
   const { session } = useSession();
   const resolved = client ?? makeClient(() => session);
   return <Shell client={resolved} />;
 }
+export function App({ client }: { client?: ApiClient }) {
+  return <SessionProvider><AppInner client={client} /></SessionProvider>;
+}
 ```
 
-Note: `makeClient(() => session)` re-reads session on each call; passing an explicit `client` is for tests.
+- [ ] **Step 4: Keep `App.test.tsx` green** — the Task 1 heading test still holds (App renders `<h1>` regardless of session). No change needed unless it fails; if it does, wrap render in nothing (App self-provides the provider).
 
-- [ ] **Step 4: Update `App.test.tsx`** (Task 1 test now needs the provider — heading assertion still valid)
+- [ ] **Step 5: Run the full suite** — `cd console && npm test && npm run typecheck && npm run lint` → ALL PASS.
 
-```tsx
-import { render, screen } from "@testing-library/react";
-import { App } from "./App";
-test("renders the console shell heading", () => {
-  render(<App />);
-  expect(screen.getByRole("heading", { name: /tourdesk console/i })).toBeInTheDocument();
-});
-```
-
-- [ ] **Step 5: Run the full test suite**
-
-Run: `cd console && npm test && npm run typecheck`
-Expected: ALL PASS, typecheck clean.
-
-- [ ] **Step 6: Accessibility pass (manual checklist, fix inline)**
-
-Verify and fix: every actionable element reachable by Tab with visible focus (tokens `:focus-visible` covers it); action buttons have text labels + key hints; the citation/unsupported cue is text ("⚠ … unsupported"), not colour-only; panes have `aria-label`; toasts use `role="status"`/`role="alert"`. Commit any fixes.
+- [ ] **Step 6: Accessibility pass (manual, fix inline)** — Tab reaches every action with visible focus (tokens `:focus-visible`); action buttons carry text + key hints; the unsupported-claims cue is text, not colour-only; panes have `aria-label`; toasts use `role="status"`/`role="alert"`. Commit any fixes.
 
 - [ ] **Step 7: Commit**
 
@@ -906,26 +513,22 @@ git add console/src && git commit -m "feat(console): app router + session gate +
 
 ---
 
-### Task 8: Backend live smoke (optional gate, manual)
+### Task 8: Backend live smoke (manual verification)
 
-**Files:** none (verification only).
+**Files:** none.
 
-- [ ] **Step 1:** Start the backend (`cd backend && <run>`; services via compose already up) and seed one tenant + a queued case (reuse a queue E2E seed helper or the store functions).
-- [ ] **Step 2:** `cd console && npm run dev`; open the browser, enter the tenant id + an HS256 token the backend accepts (matching `SSO_HMAC_SECRET`), confirm the queue loads, claim a case, the review panes render, and an action round-trips (approve→send once, or escalate).
-- [ ] **Step 3:** Record the result in `console/README.md` under a "Verified against backend" note. No commit of code; this is a live-boundary check that the API contracts in `types.ts` match reality. If a field name differs, fix `types.ts` (Task 3) and re-run the unit suite.
+- [ ] **Step 1:** Start the backend + seed one tenant and a queued case (reuse a queue E2E seed helper or store functions).
+- [ ] **Step 2:** `cd console && npm run dev`; enter the tenant id + an HS256 token matching the backend's `SSO_HMAC_SECRET`; confirm the queue loads, claim a case, the panes render, and an action round-trips.
+- [ ] **Step 3:** Record the result in `console/README.md` under "Verified against backend". If a field differs from `types.ts`, fix `types.ts` and re-run the unit suite. No code commit required beyond any `types.ts` fix.
 
 ---
 
 ## Self-Review
 
-**Spec coverage:**
-- FR-M7-01 queue → Task 4. FR-M7-02 claim/lock/409 → Task 4. FR-M7-12 SLA/breach → Task 4.
-- FR-M7-03 three panes → Tasks 5–6. FR-M7-04 citations/unsupported → Tasks 5 (source highlight) + 6 (unsupported warning). FR-M7-05 keyboard actions → Task 6. FR-M7-07 booking panel degraded → Task 5. FR-M7-19 autonomy indicator → Task 5.
-- Dev auth ① → Task 2. Polling ② → Task 4. Plain-text editor ③ → Task 6. Scaffold/a11y/smoke → Tasks 1, 7, 8.
-- Out-of-scope items (search/notes/crisis/dashboards/SSO/push/rich-text) correctly absent.
+**Spec coverage:** FR-M7-01 queue → T4; FR-M7-02 claim/409 → T4; FR-M7-12 SLA/breach → T4; FR-M7-03 three panes → T5–6; FR-M7-04 citations (inline_citations resolve flag) + unsupported_claims warning → T5/T6; FR-M7-05 keyboard actions (the 4 real ones) → T6; FR-M7-07 booking panel degraded/withheld → T5; FR-M7-19 autonomy indicator (outcome/route/reasons, no level) → T5. Dev auth ① → T2; polling ② → T4; plain-text editor ③ → T6. Scaffold/a11y/smoke → T1, T7, T8.
 
-**Placeholder scan:** no TBD/TODO; every code step has real code; the only "read the Go tags" step (Task 3.1) is a legitimate reconciliation, with a concrete default shape provided.
+**Gaps carried (backend-missing, surfaced not faked):** evidence has no `snippet` (show title/url); autonomy has no `level` (show outcome/route); thread messages have no timestamp (show from/direction); only 4 actions exist server-side (the other 4 M7-05 actions are a backend follow-up, `ActionKind` intentionally omits them). Each is recorded here and in `task-3-report.md`.
 
-**Type consistency:** `ApiClient`, `QueueItem`, `ReviewSurface`, `Citation`, `ActionKind`, `ActRequest`/`ActResult`, `Session`, `usePolling`, `makeClient(getSession, fetchImpl?)` used identically across tasks. `act()` sends `conversation_id`/`edited_body` (snake) to the backend while the TS type uses `conversationId`/`editedBody` (camel) — the mapping lives only in `client.ts`.
+**Placeholder scan:** no TBD/TODO; every code step has real code against the real types.
 
-**Known reconciliation point:** backend JSON casing (camel vs snake) is confirmed in Task 3 Step 1 against `backend/internal/queue/*.go`; `types.ts` is the single edit site if it differs.
+**Type consistency:** all field access is snake_case per `console/src/api/types.ts`; `risk_class` treated as a number; `ActRequest` DTO camelCase mapped in `client.ts`; `ActionKind` is the 4-value union everywhere; `ReviewScreen` draft-region placeholder (T5) is replaced in T6.
