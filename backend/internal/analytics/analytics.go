@@ -410,6 +410,340 @@ func computeROI(contactsAutomated, peakAbsorbed int, latest time.Time, hasRows b
 	return r
 }
 
+// ── Knowledge (FR-M10-04) ────────────────────────────────────────────────────────
+
+// CoverageBucket is one dimension value (a language, brand or authority tier) and the
+// count of non-retired knowledge items in it. Coverage is a current-state distribution
+// over the M4 index, not a windowed telemetry aggregate.
+type CoverageBucket struct {
+	Key   string `json:"key"`
+	Count int    `json:"count"`
+}
+
+// StaleItem names a knowledge item flagged stale by M4 freshness (past its review TTL or
+// status='stale'), with its last-verified time so a content owner can prioritise review.
+type StaleItem struct {
+	KnowledgeItemID string     `json:"knowledge_item_id"`
+	LastVerified    *time.Time `json:"last_verified,omitempty"`
+}
+
+// CitedItem is one knowledge item and its citation count over the window.
+type CitedItem struct {
+	KnowledgeItemID string `json:"knowledge_item_id"`
+	Citations       int    `json:"citations"`
+}
+
+// CitationRanking is the most-cited / never-cited view. Present carries a real ranked
+// list; when no per-item citation-count source exists it is a gap (Items empty, Gap set)
+// — never a fabricated count (FR-M10-04 / spec §6). Value stays absent unless Present.
+type CitationRanking struct {
+	Name    string      `json:"name"`
+	Present bool        `json:"present"`
+	Items   []CitedItem `json:"items"`
+	Gap     string      `json:"gap,omitempty"`
+}
+
+// KnowledgeGap is one top gap reused from the M8 gap miner (internal/gapmining): a theme
+// and its case volume. M10 never recomputes gaps — it surfaces the miner's clusters.
+type KnowledgeGap struct {
+	Theme  string `json:"theme"`
+	Volume int    `json:"volume"`
+}
+
+// KnowledgeReport is the knowledge dashboard (FR-M10-04). Coverage, total items and stale
+// sources are real from the M4 index/freshness; top gaps are reused from the M8 miner;
+// most-cited/never-cited are gap indicators until a per-item citation-count producer lands.
+type KnowledgeReport struct {
+	Formula             string           `json:"formula"`
+	TotalItems          Metric           `json:"total_items"`
+	CoverageByLanguage  []CoverageBucket `json:"coverage_by_language"`
+	CoverageByBrand     []CoverageBucket `json:"coverage_by_brand"`
+	CoverageByAuthority []CoverageBucket `json:"coverage_by_authority"`
+	StaleSources        Metric           `json:"stale_sources"`
+	StaleItems          []StaleItem      `json:"stale_items"`
+	TopGaps             []KnowledgeGap   `json:"top_gaps"`
+	MostCited           CitationRanking  `json:"most_cited"`
+	NeverCited          CitationRanking  `json:"never_cited"`
+	Freshness           Freshness        `json:"freshness"`
+}
+
+const knowledgeFormula = "coverage = non-retired knowledge_items grouped by language/brand/authority_tier; " +
+	"total_items = non-retired items; stale_sources = items past review TTL " +
+	"(last_verified + review_ttl_seconds < now) or status='stale' — read from M4 freshness; " +
+	"top_gaps reused from the M8 gap miner (never recomputed); " +
+	"most_cited/never_cited need a per-item citation-count producer (retrieve/generate emitting cited " +
+	"knowledge-item ids per case, not yet wired) — absent it they are gap indicators, never fabricated (spec §6)"
+
+// citationGapReason names the missing producer for most/never-cited so the gap is
+// actionable, not silent. The read query is already wired to this producer's shape.
+const citationGapReason = "source telemetry missing: per-item citation counts require the retrieve/generate stage " +
+	"to emit cited knowledge-item ids per case (not yet wired, ISSUE-0049/0050); gapped, never a fabricated count (FR-M10-04)"
+
+// knowledgeData is the raw shape the SQL produces, before computeKnowledge decides gap
+// vs present. Coverage/stale come from the current-state index; the citation fields come
+// from the (currently empty) windowed citation telemetry.
+type knowledgeData struct {
+	TotalItems     int
+	ByLanguage     []CoverageBucket
+	ByBrand        []CoverageBucket
+	ByAuthority    []CoverageBucket
+	StaleCount     int
+	StaleItems     []StaleItem
+	LatestVerified time.Time
+	HasItems       bool
+	CitationSource bool // any per-item citation telemetry row in the window
+	MostCited      []CitedItem
+	NeverCited     []CitedItem
+}
+
+// computeKnowledge turns the raw index/citation data into the dashboard, applying the
+// spec §6 rule: coverage/total/stale are real (0 items is a legitimate zero, not a gap);
+// most/never-cited are a gap unless a citation-count source is present. Pure and
+// deterministic (no I/O, no wall-clock beyond the passed `now`).
+func computeKnowledge(d knowledgeData, gaps []KnowledgeGap, now time.Time) KnowledgeReport {
+	r := KnowledgeReport{
+		Formula: knowledgeFormula,
+		// An empty KB is a real 0 (a new tenant), not a source-down gap — freshness below
+		// signals "no data yet". Coverage of an SLA-like figure would gap; coverage counts do not.
+		TotalItems:          present("total_items", float64(d.TotalItems)),
+		CoverageByLanguage:  nonNilBuckets(d.ByLanguage),
+		CoverageByBrand:     nonNilBuckets(d.ByBrand),
+		CoverageByAuthority: nonNilBuckets(d.ByAuthority),
+		StaleSources:        present("stale_sources", float64(d.StaleCount)),
+		StaleItems:          nonNilStale(d.StaleItems),
+		TopGaps:             nonNilGaps(gaps),
+		Freshness:           freshness(d.LatestVerified, d.HasItems, now),
+	}
+	if !d.CitationSource {
+		// Fail-closed (spec §6): no citation source ⇒ gap, never a fabricated count or a
+		// false zero (which would mislabel every item as never-cited).
+		r.MostCited = CitationRanking{Name: "most_cited", Items: []CitedItem{}, Gap: citationGapReason}
+		r.NeverCited = CitationRanking{Name: "never_cited", Items: []CitedItem{}, Gap: citationGapReason}
+		return r
+	}
+	r.MostCited = CitationRanking{Name: "most_cited", Present: true, Items: nonNilCited(d.MostCited)}
+	r.NeverCited = CitationRanking{Name: "never_cited", Present: true, Items: nonNilCited(d.NeverCited)}
+	return r
+}
+
+func nonNilBuckets(b []CoverageBucket) []CoverageBucket {
+	if b == nil {
+		return []CoverageBucket{}
+	}
+	return b
+}
+func nonNilStale(s []StaleItem) []StaleItem {
+	if s == nil {
+		return []StaleItem{}
+	}
+	return s
+}
+func nonNilGaps(g []KnowledgeGap) []KnowledgeGap {
+	if g == nil {
+		return []KnowledgeGap{}
+	}
+	return g
+}
+func nonNilCited(c []CitedItem) []CitedItem {
+	if c == nil {
+		return []CitedItem{}
+	}
+	return c
+}
+
+// knowledgeCoverageSQL distributes non-retired knowledge items across three dimensions in
+// one pass. RLS scopes the rows to cur_tenant(); the caller runs require_tenant() first so
+// a scopeless query FAILS rather than returning empty (FR-M10-08).
+const knowledgeCoverageSQL = `
+WITH live AS (
+  SELECT language, brand_id, authority_tier
+  FROM knowledge_items
+  WHERE status <> 'retired'
+)
+SELECT dim, key, count(*)::int FROM (
+  SELECT 'language'::text  AS dim, coalesce(nullif(language, ''), '(unset)') AS key FROM live
+  UNION ALL
+  SELECT 'authority',      authority_tier::text                             FROM live
+  UNION ALL
+  SELECT 'brand',          coalesce(brand_id::text, '(tenant-wide)')        FROM live
+) x
+GROUP BY dim, key
+ORDER BY dim, key`
+
+// knowledgeStaleSQL summarises the index: total non-retired items, how many are stale, and
+// the latest last-verified (the freshness anchor). The stale predicate mirrors the retrieve
+// path's Item.stale (knowledge.go): past review TTL, or explicitly status='stale'.
+const knowledgeStaleSQL = `
+WITH live AS (
+  SELECT last_verified, review_ttl_seconds, status FROM knowledge_items WHERE status <> 'retired'
+)
+SELECT
+  count(*)::int,
+  count(*) FILTER (WHERE
+    status = 'stale'
+    OR (review_ttl_seconds IS NOT NULL AND review_ttl_seconds > 0
+        AND last_verified IS NOT NULL
+        AND last_verified + (review_ttl_seconds * interval '1 second') < $1))::int,
+  max(last_verified)
+FROM live`
+
+// knowledgeStaleItemsSQL lists the stale items (capped) so a content owner can act. Same
+// predicate as the summary; ordered oldest-verified first.
+const knowledgeStaleItemsSQL = `
+SELECT id, last_verified
+FROM knowledge_items
+WHERE status <> 'retired'
+  AND (status = 'stale'
+       OR (review_ttl_seconds IS NOT NULL AND review_ttl_seconds > 0
+           AND last_verified IS NOT NULL
+           AND last_verified + (review_ttl_seconds * interval '1 second') < $1))
+ORDER BY last_verified NULLS FIRST, id
+LIMIT $2`
+
+// knowledgeMostCitedSQL counts per-item citations over the window from the future producer's
+// telemetry shape: one row per citation, stage='generate', metric='citation', value=<item id>
+// (what the retrieve/generate stage will emit per case — ISSUE-0049/0050). No such rows exist
+// today, so this returns empty and most-cited is gapped; wiring it here means the metric
+// becomes real with no interface change once the producer lands.
+const knowledgeMostCitedSQL = `
+SELECT value, count(*)::int
+FROM telemetry_events
+WHERE stage = 'generate' AND metric = 'citation' AND ts >= $1 AND ts < $2
+GROUP BY value
+ORDER BY count(*) DESC, value
+LIMIT $3`
+
+// knowledgeNeverCitedSQL lists non-retired items with zero citations over the window. Only
+// meaningful once a citation source exists (else every item is trivially "never cited",
+// which the guardrail forbids surfacing) — the caller runs it ONLY when CitationSource.
+const knowledgeNeverCitedSQL = `
+SELECT k.id
+FROM knowledge_items k
+WHERE k.status <> 'retired'
+  AND NOT EXISTS (
+    SELECT 1 FROM telemetry_events t
+    WHERE t.stage = 'generate' AND t.metric = 'citation'
+      AND t.value = k.id::text AND t.ts >= $1 AND t.ts < $2
+  )
+ORDER BY k.id
+LIMIT $3`
+
+// knowledgeItemCap bounds the stale/most/never-cited lists so the dashboard payload stays
+// bounded regardless of index size.
+const knowledgeItemCap = 50
+
+// Knowledge runs the knowledge dashboard aggregate under the tx's tenant scope. tx MUST come
+// from store.WithTenant; a scopeless tx makes require_tenant() raise (FR-M10-08, ADR-0015).
+// `gaps` are the M8 miner's top clusters, reused (never recomputed). Coverage/total/stale are
+// current-state over the index; the citation window is [w.From, w.To).
+func Knowledge(ctx context.Context, tx pgx.Tx, w Window, now time.Time, gaps []KnowledgeGap) (KnowledgeReport, error) {
+	// Isolation guard (ADR-0015): require_tenant() raises on a scopeless tx, so a missing
+	// scope FAILS here rather than the SQL returning a silent empty a caller could misread.
+	var scope string
+	if err := tx.QueryRow(ctx, `SELECT require_tenant()`).Scan(&scope); err != nil {
+		return KnowledgeReport{}, fmt.Errorf("analytics: knowledge tenant scope required: %w", err)
+	}
+
+	var d knowledgeData
+	if err := loadCoverage(ctx, tx, &d); err != nil {
+		return KnowledgeReport{}, err
+	}
+	if err := loadStale(ctx, tx, now, &d); err != nil {
+		return KnowledgeReport{}, err
+	}
+	if err := loadCitations(ctx, tx, w, &d); err != nil {
+		return KnowledgeReport{}, err
+	}
+	return computeKnowledge(d, gaps, now), nil
+}
+
+func loadCoverage(ctx context.Context, tx pgx.Tx, d *knowledgeData) error {
+	rows, err := tx.Query(ctx, knowledgeCoverageSQL)
+	if err != nil {
+		return fmt.Errorf("analytics: knowledge coverage query: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dim, key string
+		var n int
+		if err := rows.Scan(&dim, &key, &n); err != nil {
+			return fmt.Errorf("analytics: scan coverage: %w", err)
+		}
+		b := CoverageBucket{Key: key, Count: n}
+		switch dim {
+		case "language":
+			d.ByLanguage = append(d.ByLanguage, b)
+		case "brand":
+			d.ByBrand = append(d.ByBrand, b)
+		case "authority":
+			d.ByAuthority = append(d.ByAuthority, b)
+		}
+	}
+	return rows.Err()
+}
+
+func loadStale(ctx context.Context, tx pgx.Tx, now time.Time, d *knowledgeData) error {
+	var latest *time.Time
+	if err := tx.QueryRow(ctx, knowledgeStaleSQL, now).Scan(&d.TotalItems, &d.StaleCount, &latest); err != nil {
+		return fmt.Errorf("analytics: knowledge stale summary query: %w", err)
+	}
+	d.HasItems = d.TotalItems > 0
+	if latest != nil {
+		d.LatestVerified = *latest
+	}
+	rows, err := tx.Query(ctx, knowledgeStaleItemsSQL, now, knowledgeItemCap)
+	if err != nil {
+		return fmt.Errorf("analytics: knowledge stale items query: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var it StaleItem
+		if err := rows.Scan(&it.KnowledgeItemID, &it.LastVerified); err != nil {
+			return fmt.Errorf("analytics: scan stale item: %w", err)
+		}
+		d.StaleItems = append(d.StaleItems, it)
+	}
+	return rows.Err()
+}
+
+func loadCitations(ctx context.Context, tx pgx.Tx, w Window, d *knowledgeData) error {
+	rows, err := tx.Query(ctx, knowledgeMostCitedSQL, w.From, w.To, knowledgeItemCap)
+	if err != nil {
+		return fmt.Errorf("analytics: knowledge most-cited query: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ci CitedItem
+		if err := rows.Scan(&ci.KnowledgeItemID, &ci.Citations); err != nil {
+			return fmt.Errorf("analytics: scan cited item: %w", err)
+		}
+		d.MostCited = append(d.MostCited, ci)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// A citation source is present iff at least one per-item citation row exists in the
+	// window. Only then is never-cited meaningful (else every item is trivially never-cited,
+	// which the guardrail forbids surfacing).
+	d.CitationSource = len(d.MostCited) > 0
+	if !d.CitationSource {
+		return nil
+	}
+	nrows, err := tx.Query(ctx, knowledgeNeverCitedSQL, w.From, w.To, knowledgeItemCap)
+	if err != nil {
+		return fmt.Errorf("analytics: knowledge never-cited query: %w", err)
+	}
+	defer nrows.Close()
+	for nrows.Next() {
+		var id string
+		if err := nrows.Scan(&id); err != nil {
+			return fmt.Errorf("analytics: scan never-cited item: %w", err)
+		}
+		d.NeverCited = append(d.NeverCited, CitedItem{KnowledgeItemID: id})
+	}
+	return nrows.Err()
+}
+
 // roiSQL sums auto-sent cases (contacts absorbed by automation) and the busiest day's count
 // (peak absorbed) in the window. require_tenant() forces a scopeless query to FAIL (FR-M10-08).
 const roiSQL = `

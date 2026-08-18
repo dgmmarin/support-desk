@@ -234,6 +234,122 @@ func TestFRM1005ROIConfiguredComputesInTenantCurrency(t *testing.T) {
 	}
 }
 
+// ── Knowledge (FR-M10-04) ────────────────────────────────────────────────────────
+
+// TestFRM1004CoverageAndStaleFromIndex: coverage (by language/brand/authority), total
+// items and stale count are REAL figures read from the M4 index/freshness. Freshness
+// renders when the KB has items; the formula is surfaced inline (SR-M10-01).
+func TestFRM1004CoverageAndStaleFromIndex(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	d := knowledgeData{
+		TotalItems:     5,
+		ByLanguage:     []CoverageBucket{{Key: "de", Count: 2}, {Key: "en", Count: 3}},
+		ByAuthority:    []CoverageBucket{{Key: "1", Count: 2}, {Key: "4", Count: 3}},
+		ByBrand:        []CoverageBucket{{Key: "(tenant-wide)", Count: 5}},
+		StaleCount:     2,
+		StaleItems:     []StaleItem{{KnowledgeItemID: "k-stale-1"}, {KnowledgeItemID: "k-stale-2"}},
+		LatestVerified: now.Add(-2 * time.Hour),
+		HasItems:       true,
+	}
+
+	r := computeKnowledge(d, nil, now)
+
+	if !r.TotalItems.Present || r.TotalItems.Value != 5 {
+		t.Fatalf("total items = %v (present=%v), want 5 present", r.TotalItems.Value, r.TotalItems.Present)
+	}
+	if len(r.CoverageByLanguage) != 2 || r.CoverageByLanguage[0].Key != "de" || r.CoverageByLanguage[1].Count != 3 {
+		t.Fatalf("coverage by language = %+v, want de:2, en:3", r.CoverageByLanguage)
+	}
+	if len(r.CoverageByAuthority) != 2 || len(r.CoverageByBrand) != 1 {
+		t.Fatalf("coverage by authority/brand = %+v / %+v", r.CoverageByAuthority, r.CoverageByBrand)
+	}
+	if !r.StaleSources.Present || r.StaleSources.Value != 2 {
+		t.Fatalf("stale sources = %v (present=%v), want 2 real from M4 freshness (FR-M10-04)", r.StaleSources.Value, r.StaleSources.Present)
+	}
+	if len(r.StaleItems) != 2 {
+		t.Fatalf("stale items = %d, want 2", len(r.StaleItems))
+	}
+	if !r.Freshness.Present {
+		t.Fatal("freshness must be present when the KB has items")
+	}
+	// SR-M10-01: the formula names the stale predicate and the citation-gap rule.
+	if r.Formula == "" || !containsAll(r.Formula, "stale", "citation", "coverage") {
+		t.Fatalf("formula must surface coverage/stale/citation (SR-M10-01), got %q", r.Formula)
+	}
+}
+
+// TestFRM1004MostNeverCitedGapWhenNoCitationSource is the load-bearing spec §6 guardrail:
+// per-item citation counts require a producer that is NOT wired yet, so most-cited and
+// never-cited MUST be gap indicators — never a fabricated count, never a false zero.
+func TestFRM1004MostNeverCitedGapWhenNoCitationSource(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	d := knowledgeData{TotalItems: 3, HasItems: true, CitationSource: false}
+
+	r := computeKnowledge(d, nil, now)
+
+	for _, cr := range []CitationRanking{r.MostCited, r.NeverCited} {
+		if cr.Present {
+			t.Fatalf("%s must be a gap when no citation source, got present", cr.Name)
+		}
+		if cr.Gap == "" {
+			t.Fatalf("%s gap must name the missing producer (never a silent gap)", cr.Name)
+		}
+		if len(cr.Items) != 0 {
+			t.Fatalf("%s must carry no items when gapped (never fabricated), got %+v", cr.Name, cr.Items)
+		}
+	}
+}
+
+// TestFRM1004MostNeverCitedRealWhenCitationSourcePresent: once a citation-count source
+// exists the rankings render real — most-cited ranked by count, never-cited the zero-cited
+// items. This proves the query is WIRED, not stubbed to gap forever.
+func TestFRM1004MostNeverCitedRealWhenCitationSourcePresent(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	d := knowledgeData{
+		TotalItems:     3,
+		HasItems:       true,
+		CitationSource: true,
+		MostCited:      []CitedItem{{KnowledgeItemID: "k1", Citations: 5}, {KnowledgeItemID: "k2", Citations: 2}},
+		NeverCited:     []CitedItem{{KnowledgeItemID: "k3", Citations: 0}},
+	}
+
+	r := computeKnowledge(d, nil, now)
+
+	if !r.MostCited.Present || len(r.MostCited.Items) != 2 || r.MostCited.Items[0].Citations != 5 {
+		t.Fatalf("most cited = %+v, want present ranked [k1:5, k2:2]", r.MostCited)
+	}
+	if !r.NeverCited.Present || len(r.NeverCited.Items) != 1 || r.NeverCited.Items[0].KnowledgeItemID != "k3" {
+		t.Fatalf("never cited = %+v, want present [k3]", r.NeverCited)
+	}
+}
+
+// TestFRM1004FreshnessGapWhenNoItems: an empty knowledge base is a real zero (a new tenant),
+// so total items renders 0 present, but freshness is a gap (no last-verified anchor).
+func TestFRM1004FreshnessGapWhenNoItems(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	r := computeKnowledge(knowledgeData{HasItems: false}, nil, now)
+
+	if r.Freshness.Present {
+		t.Fatal("freshness must be a gap when the KB has no items")
+	}
+	if !r.TotalItems.Present || r.TotalItems.Value != 0 {
+		t.Fatalf("total items = %v (present=%v), want a real 0 for an empty KB", r.TotalItems.Value, r.TotalItems.Present)
+	}
+}
+
+// TestFRM1004TopGapsReusedFromMiner: top knowledge gaps are the M8 miner's clusters passed
+// through, never recomputed in M10.
+func TestFRM1004TopGapsReusedFromMiner(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	gaps := []KnowledgeGap{{Theme: "refund", Volume: 3}, {Theme: "baggage", Volume: 1}}
+
+	r := computeKnowledge(knowledgeData{HasItems: true}, gaps, now)
+
+	if len(r.TopGaps) != 2 || r.TopGaps[0].Theme != "refund" || r.TopGaps[0].Volume != 3 {
+		t.Fatalf("top gaps = %+v, want [refund:3, baggage:1] reused from the miner", r.TopGaps)
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		found := false

@@ -81,7 +81,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0049](ISSUE-0049-m4-canonical-browser-multilingual.md) | Canonical answers authored in-console + knowledge browser (search/usage/retire/review) + multilingual answering | done | M4 | M | 0047, 0037 |
 | [0050](ISSUE-0050-m8-gap-mining.md) | Knowledge-gap mining (cluster abstain/low-conf/edited, rank by volume×cost) | done | M8 | M | 0047, 0034 |
 | [0051](ISSUE-0051-m8-promotion-contradiction-tonebank.md) | Canonical-answer promotion + contradiction detection + tone-example bank | done | M8 | M | 0049, 0034 |
-| [0052](ISSUE-0052-m10-knowledge-dashboard.md) | Knowledge analytics dashboard (coverage, gaps, stale, most/never-cited) | todo | M10 | M | 0047, 0032 |
+| [0052](ISSUE-0052-m10-knowledge-dashboard.md) | Knowledge analytics dashboard (coverage, gaps, stale, most/never-cited) | done | M10 | M | 0047, 0032, 0050 |
 | [0053](ISSUE-0053-m1-mail-provider.md) | MailProvider interface + IMAP/SMTP, MS Graph, Gmail providers (swappable, ≤60s to pipeline) | todo | M1 | M | 0005, 0020, 0037 |
 | [0054](ISSUE-0054-m1-multimailbox-bounce.md) | Multi-mailbox / multi-identity routing + bounce hard/soft classification + onboarding deliverability validation | todo | M1 | M | 0053, 0037 |
 | [0055](ISSUE-0055-m7-queue-claim-sla.md) | Case queue scoring service + claim/lock (idle-release) + SLA timers/breach | todo | M7 | M | 0007, 0037 |

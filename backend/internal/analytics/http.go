@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"tourdesk/internal/gapmining"
+	"tourdesk/internal/knowledgeindex"
 	"tourdesk/internal/store"
 )
 
@@ -27,6 +30,20 @@ import (
 type Handler struct {
 	DB    *store.DB
 	Clock func() time.Time // injectable for deterministic windows/freshness (tests)
+	// Embedder is the model seam the knowledge dashboard's top-gap mining reuses
+	// (internal/gapmining, ADR-0010). Nil defaults to the deterministic HashEmbedder —
+	// enough to cluster gap emails; a pinned provider swaps in behind the same interface.
+	Embedder gapmining.Embedder
+}
+
+// topGapCount bounds how many miner clusters the knowledge dashboard surfaces.
+const topGapCount = 10
+
+func (h Handler) embedder() gapmining.Embedder {
+	if h.Embedder != nil {
+		return h.Embedder
+	}
+	return knowledgeindex.HashEmbedder{}
 }
 
 var errUnknownKind = errors.New("analytics: unknown report kind")
@@ -86,6 +103,24 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rep, e := ROI(r.Context(), tx, win, now, a)
 			body = rep
 			return e
+		case "knowledge":
+			// Top gaps are REUSED from the M8 gap miner (never recomputed here). Cost
+			// assumptions rank the clusters; nil ⇒ volume-only ranking (never a guess).
+			cfg, e := store.GetCostAssumptions(r.Context(), tx)
+			if e != nil {
+				return e
+			}
+			var gc *gapmining.CostAssumptions
+			if cfg != nil {
+				gc = &gapmining.CostAssumptions{Currency: cfg.Currency, AgentHourlyCost: cfg.AgentHourlyCost, AvgHandlingMinutes: cfg.AvgHandlingMinutes}
+			}
+			gaps, e := topGaps(r.Context(), tx, win, h.embedder(), gc)
+			if e != nil {
+				return e
+			}
+			rep, e := Knowledge(r.Context(), tx, win, now, gaps)
+			body = rep
+			return e
 		default:
 			return errUnknownKind
 		}
@@ -128,4 +163,23 @@ func parseWindow(r *http.Request, now time.Time) (Window, error) {
 
 func errBadTime(param string) error {
 	return errors.New("invalid " + param + ": want RFC3339 timestamp")
+}
+
+// topGaps mines the window's knowledge gaps via the M8 miner and returns its top clusters
+// as dashboard rows (theme + volume), reusing the miner rather than recomputing (FR-M10-04).
+// tx is already tenant-scoped; the miner degrades to its raw list on an embedder failure and
+// never blocks, so a clustering issue does not fail the dashboard.
+func topGaps(ctx context.Context, tx pgx.Tx, w Window, emb gapmining.Embedder, cost *gapmining.CostAssumptions) ([]KnowledgeGap, error) {
+	rep, err := gapmining.Mine(ctx, tx, gapmining.Window{From: w.From, To: w.To}, emb, cost, gapmining.Options{})
+	if err != nil {
+		return nil, err // a DB/isolation error is fail-closed (surfaced as 500), not a silent empty
+	}
+	out := make([]KnowledgeGap, 0, topGapCount)
+	for i, c := range rep.Clusters {
+		if i >= topGapCount {
+			break
+		}
+		out = append(out, KnowledgeGap{Theme: c.Theme, Volume: c.Volume})
+	}
+	return out, nil
 }
