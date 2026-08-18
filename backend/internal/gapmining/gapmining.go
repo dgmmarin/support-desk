@@ -21,12 +21,12 @@ package gapmining
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"tourdesk/internal/textcluster"
 )
 
 // Embedder maps email text to a vector — the ADR-0010 model seam, reused from the
@@ -236,12 +236,11 @@ func groupByConversation(rows []gapRow) []GapCase {
 	return out
 }
 
-// cluster is a mutable accumulator used while grouping; centroidSum/count give a
-// running mean centroid so the cosine test is order-stable and cheap.
+// cluster is a group of gap cases sharing a theme. Grouping itself is delegated to
+// the shared textcluster primitive (reused by M9 crisis detection too), so gapmining
+// no longer carries its own cosine/centroid/tokeniser.
 type cluster struct {
-	members     []GapCase
-	centroidSum []float32
-	count       int
+	members []GapCase
 }
 
 // clusterAndRank embeds each case's email, greedily groups by cosine similarity, then
@@ -265,41 +264,28 @@ func clusterAndRank(ctx context.Context, e Embedder, cases []GapCase, cost *Cost
 	return rep, nil
 }
 
-// group runs the greedy cosine clustering.
+// group runs the shared greedy cosine clustering (textcluster), keyed on the case's
+// conversation id so members map straight back to their GapCase.
 func group(ctx context.Context, e Embedder, cases []GapCase, sim float64) ([]cluster, error) {
-	var clusters []cluster
-	for _, gc := range cases {
-		vec, err := e.Embed(ctx, gc.Email)
-		if err != nil {
-			return nil, err
-		}
-		best, bestSim := -1, sim
-		for i := range clusters {
-			s := cosine(vec, centroid(clusters[i]))
-			if s >= bestSim {
-				best, bestSim = i, s
-			}
-		}
-		if best < 0 {
-			clusters = append(clusters, cluster{members: []GapCase{gc}, centroidSum: append([]float32(nil), vec...), count: 1})
-			continue
-		}
-		c := &clusters[best]
-		c.members = append(c.members, gc)
-		for i := range c.centroidSum {
-			c.centroidSum[i] += vec[i]
-		}
-		c.count++
+	byID := make(map[string]GapCase, len(cases))
+	items := make([]textcluster.Item, len(cases))
+	for i, gc := range cases {
+		byID[gc.ConversationID] = gc
+		items[i] = textcluster.Item{ID: gc.ConversationID, Text: gc.Email}
 	}
-	return clusters, nil
-}
-
-func centroid(c cluster) []float32 {
-	out := make([]float32, len(c.centroidSum))
-	for i, s := range c.centroidSum {
-		out[i] = s / float32(c.count)
+	groups, err := textcluster.Group(ctx, e, items, sim)
+	if err != nil {
+		return nil, err
 	}
-	return out
+	out := make([]cluster, 0, len(groups))
+	for _, g := range groups {
+		members := make([]GapCase, 0, len(g.Members))
+		for _, m := range g.Members {
+			members = append(members, byID[m.ID])
+		}
+		out = append(out, cluster{members: members})
+	}
+	return out, nil
 }
 
 // rank turns clusters into GapClusters with theme + cost, then orders them by
@@ -365,79 +351,12 @@ func sortClusters(cs []GapCluster, cost *CostAssumptions) {
 	})
 }
 
-// stopwords are the low-signal tokens dropped when deriving a theme label.
-var stopwords = map[string]bool{
-	"the": true, "a": true, "an": true, "and": true, "or": true, "to": true, "of": true,
-	"for": true, "in": true, "on": true, "is": true, "are": true, "do": true, "i": true,
-	"my": true, "me": true, "you": true, "please": true, "how": true, "can": true, "get": true,
-	"we": true, "it": true, "this": true, "that": true, "with": true, "have": true, "back": true,
-}
-
-// theme derives a deterministic label from a cluster's emails: the most
-// representative significant term. It ranks by document frequency first (how many
-// emails mention it — robust to one spammy email), tie-broken by total frequency
-// (repeated emphasis within emails), then alphabetically. It reuses the embedder's
-// tokenisation (lowercase alnum) so the theme reflects what was clustered.
+// theme derives a cluster's deterministic label from its emails via the shared
+// textcluster theme heuristic (most representative significant term).
 func theme(members []GapCase) string {
-	docFreq, totalFreq := map[string]int{}, map[string]int{}
-	for _, m := range members {
-		seen := map[string]bool{}
-		for _, tok := range tokenize(m.Email) {
-			if len(tok) < 3 || stopwords[tok] {
-				continue
-			}
-			totalFreq[tok]++
-			if !seen[tok] {
-				seen[tok] = true
-				docFreq[tok]++
-			}
-		}
+	texts := make([]string, len(members))
+	for i, m := range members {
+		texts[i] = m.Email
 	}
-	best := ""
-	for tok := range docFreq {
-		if best == "" {
-			best = tok
-			continue
-		}
-		if df, bf := docFreq[tok], docFreq[best]; df != bf {
-			if df > bf {
-				best = tok
-			}
-			continue
-		}
-		if tf, bf := totalFreq[tok], totalFreq[best]; tf != bf {
-			if tf > bf {
-				best = tok
-			}
-			continue
-		}
-		if tok < best {
-			best = tok
-		}
-	}
-	if best == "" {
-		return "(no theme)"
-	}
-	return best
-}
-
-func tokenize(text string) []string {
-	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
-	})
-}
-
-// cosine is the cosine similarity of two equal-length vectors; a zero-norm vector
-// (empty email) yields 0 so it never spuriously joins a cluster.
-func cosine(a, b []float32) float64 {
-	var dot, na, nb float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		na += float64(a[i]) * float64(a[i])
-		nb += float64(b[i]) * float64(b[i])
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(na) * math.Sqrt(nb))
+	return textcluster.Theme(texts)
 }
