@@ -36,6 +36,36 @@ func TestBuildInputAllPassYieldsAutoSend(t *testing.T) {
 	}
 }
 
+// FR-M9-05: the automation freeze forces an otherwise-auto_send case to human via the
+// gate's kill-switch condition (G01), and lifting the freeze restores normal routing.
+// The freeze is a scoped extension of the kill switch, not a parallel halt.
+func TestFR_M9_05_ApplyFreezeForcesHumanAndLiftRestores(t *testing.T) {
+	base := BuildInput(allPassSignals(), permissivePolicy(), false, false)
+
+	frozen := ApplyFreeze(base, true)
+	if !frozen.KillSwitch {
+		t.Fatal("freeze must engage the kill-switch input (G01)")
+	}
+	if res := gate.Evaluate(frozen); res.Outcome == gate.AutoSend {
+		t.Fatalf("frozen topic must not auto_send; got %s", res.Outcome)
+	}
+
+	// Lifting the freeze (frozen=false) leaves the case auto_send-eligible again.
+	lifted := ApplyFreeze(base, false)
+	if res := gate.Evaluate(lifted); res.Outcome != gate.AutoSend {
+		t.Fatalf("lifted freeze should restore auto_send; got %s (reasons %v)", res.Outcome, res.ReasonsForAgent)
+	}
+}
+
+// FR-M9-05 scope: ApplyFreeze never *clears* an already-engaged kill switch — it only
+// OR-s the freeze in, so a genuine kill switch stays engaged even when not frozen.
+func TestFR_M9_05_ApplyFreezeDoesNotClearExistingKill(t *testing.T) {
+	killed := BuildInput(allPassSignals(), permissivePolicy(), true, false)
+	if got := ApplyFreeze(killed, false); !got.KillSwitch {
+		t.Fatal("ApplyFreeze(false) must not clear an existing kill switch")
+	}
+}
+
 // test_build_input_kill_switch_blocks
 func TestBuildInputKillSwitchBlocks(t *testing.T) {
 	in := BuildInput(allPassSignals(), permissivePolicy(), true /*kill*/, false)

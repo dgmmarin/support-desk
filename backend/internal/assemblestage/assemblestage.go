@@ -27,6 +27,7 @@ type CaseSignals struct {
 	Brand                     string `json:"brand"`
 	Recipient                 string `json:"recipient"` // address the reply would go to (G12 exclusion check)
 	Intent                    string `json:"intent"`
+	Topic                     string `json:"topic"` // classified topic (M3) — consulted for the crisis freeze (FR-M9-05)
 	RiskClass                 int    `json:"risk_class"`
 	Confidence                float64
 	AllClaimsGrounded         bool
@@ -141,6 +142,16 @@ func HumanTookOver(msgs []store.Message) bool {
 	return false
 }
 
+// ApplyFreeze OR-s the crisis automation freeze into the gate's kill-switch input
+// (FR-M9-05, G01): while the case's topic is frozen the underlying facts may now be
+// false (a live disruption), so an otherwise-auto_send case is forced to human. It is
+// a scoped extension of the existing kill switch, never a parallel halt, and it only
+// engages — it never clears an already-engaged kill switch (fail-closed OR).
+func ApplyFreeze(in gate.Input, frozen bool) gate.Input {
+	in.KillSwitch = in.KillSwitch || frozen
+	return in
+}
+
 // ApplyEvalSetCap caps the assembled input's autonomy level at L1 when the intent
 // has no held-out frozen eval set (FR-M8-05 guardrail, ties CAL-03). It reuses the
 // pure eval.CapLevelForEvalSet and flows through the gate's existing level check
@@ -190,6 +201,16 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, db 
 				return e
 			}
 			in = ApplyEvalSetCap(BuildInput(s, pol, kill, breaker), evalSet)
+
+			// FR-M9-05 automation freeze: if the case's topic is frozen by an open crisis
+			// event, force human (G01) — the freeze overrides the per-intent allowlist
+			// because the underlying facts may now be stale (spec §5). A read error routes
+			// the case to review (fail-closed, most-restrictive on any unreadable input).
+			frozen, e := store.IsTopicFrozen(ctx, tx, s.Topic)
+			if e != nil {
+				return e
+			}
+			in = ApplyFreeze(in, frozen)
 
 			// G12 (FR-M6-07/08): derive the human-takeover and exclusion signals from
 			// the source of truth — the thread's message history and the tenant
