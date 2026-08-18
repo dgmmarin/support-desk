@@ -70,6 +70,52 @@ func TestEvalSetCapApplied(t *testing.T) {
 	}
 }
 
+// test_FR_M6_08_recipient_excluded — the tenant exclusion list is the source of
+// truth (store.GetExclusions). Match is case-insensitive on the exact address, and
+// an "@domain" entry excludes every address at that domain. An empty/unknown
+// recipient never spuriously matches.
+func TestRecipientExcluded(t *testing.T) {
+	ex := store.Exclusions{Recipients: []string{"vip@corp.example", "  Complainant@Corp.Example ", "@partner.example"}}
+	cases := map[string]bool{
+		"vip@corp.example":        true,
+		"VIP@Corp.Example":        true, // case-insensitive
+		"complainant@corp.example": true, // trimmed + case-folded entry
+		"anyone@partner.example":  true,  // domain entry
+		"ANYONE@PARTNER.EXAMPLE":  true,
+		"customer@other.example":  false,
+		"":                        false,
+	}
+	for addr, want := range cases {
+		if got := RecipientExcluded(addr, ex); got != want {
+			t.Fatalf("RecipientExcluded(%q) = %v, want %v", addr, got, want)
+		}
+	}
+	// An empty list excludes nobody.
+	if RecipientExcluded("vip@corp.example", store.Exclusions{}) {
+		t.Fatal("an empty exclusion list must exclude nobody")
+	}
+}
+
+// test_FR_M6_07_human_took_over — a takeover is any outbound message on the thread
+// that a human (not the automation) sent. Inbound customer mail and the desk's own
+// automated outbound replies are not takeovers.
+func TestHumanTookOver(t *testing.T) {
+	quiet := []store.Message{
+		{Direction: "inbound", Automated: false},
+		{Direction: "outbound", Automated: true}, // desk auto-reply, not a human
+	}
+	if HumanTookOver(quiet) {
+		t.Fatal("no human outbound reply must not count as a takeover (FR-M6-07)")
+	}
+	took := append(quiet, store.Message{Direction: "outbound", Automated: false})
+	if !HumanTookOver(took) {
+		t.Fatal("a human (non-automated) outbound reply is a takeover (FR-M6-07)")
+	}
+	if HumanTookOver(nil) {
+		t.Fatal("an empty thread is not a takeover")
+	}
+}
+
 // test_required_level_from_risk
 func TestRequiredLevelFromRisk(t *testing.T) {
 	cases := map[int]gate.Level{0: gate.L2, 1: gate.L3, 2: gate.L4, 4: gate.L4}

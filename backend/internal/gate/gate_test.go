@@ -144,6 +144,40 @@ func TestHardStopDominatesRouting(t *testing.T) {
 	}
 }
 
+// test_FR_M6_07_human_takeover_routes_to_normal_queue (G12) — a human already
+// replied in the thread ⇒ never auto-send, routes to the normal queue (§4), never
+// the specialist queue (no hard-stop).
+func TestFRM607HumanTakeoverRoutesToQueue(t *testing.T) {
+	in := passingInput()
+	in.ThreadHumanReplied = true
+	res := Evaluate(in)
+	if res.Outcome == AutoSend {
+		t.Fatal("a human takeover in the thread must never auto-send (FR-M6-07, G12)")
+	}
+	if res.Route != RouteQueue {
+		t.Fatalf("route = %q, want queue (normal, per §4)", res.Route)
+	}
+}
+
+// test_FR_M6_08_exclusion_or_human_requested_blocks (G12) — an excluded recipient
+// or one who asked for a human ⇒ never auto-send, routes to the normal queue.
+func TestFRM608ExclusionOrHumanRequestedBlocks(t *testing.T) {
+	for name, mutate := range map[string]func(*Input){
+		"exclusion_list":  func(in *Input) { in.ExclusionHit = true },
+		"human_requested": func(in *Input) { in.HumanRequested = true },
+	} {
+		in := passingInput()
+		mutate(&in)
+		res := Evaluate(in)
+		if res.Outcome == AutoSend {
+			t.Fatalf("%s: must never auto-send (FR-M6-08, G12)", name)
+		}
+		if res.Route != RouteQueue {
+			t.Fatalf("%s: route = %q, want queue", name, res.Route)
+		}
+	}
+}
+
 // test_FR_M6_02_R1_without_strong_verification (§9 case 5, G08)
 func TestFRM602R1WithoutStrongVerificationBlocks(t *testing.T) {
 	in := r1PassingInput()
