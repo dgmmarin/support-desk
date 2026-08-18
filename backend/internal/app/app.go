@@ -20,7 +20,11 @@ import (
 	"tourdesk/internal/knowledgebrowser"
 	"tourdesk/internal/knowledgeindex"
 	"tourdesk/internal/queue"
+	"tourdesk/internal/rbac"
+	"tourdesk/internal/sso"
 	"tourdesk/internal/store"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Server is a running backend instance.
@@ -74,7 +78,14 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 	// M4 knowledge browser (tenant-scoped): /knowledge/{search,stale,retire}.
 	mux.Handle("/knowledge/", knowledgebrowser.Handler{DB: appDB})
 	// M8 canonical-answer promotion (tenant-scoped, human-gated): /promotion/{propose,approve}.
-	mux.Handle("/promotion/", canonpromote.Handler{DB: appDB, Index: knowledgeindex.New(knowledgeindex.HashEmbedder{})})
+	// M11 RBAC guard (FR-M11-04): promotion is a privileged action — only a content-owner
+	// (or senior/supervisor) may approve. The guard authenticates via SSO, resolves the
+	// tenant from the signed credential and the subject's roles from the tenant store, and
+	// refuses an insufficient role (403). Unconfigured SSO ⇒ DenyAll ⇒ 401 (fail-closed).
+	verifier := ssoVerifier(cfg)
+	roleSrc := storeRoleSource{db: appDB}
+	promotion := canonpromote.Handler{DB: appDB, Index: knowledgeindex.New(knowledgeindex.HashEmbedder{})}
+	mux.Handle("/promotion/", rbac.Guard{Verifier: verifier, Roles: roleSrc, Require: rbac.PermKnowledgeApprove, Next: promotion})
 	// M7 agent-console queue (tenant-scoped): GET /queue (scored), POST /queue/{claim,resolve}.
 	mux.Handle("/queue", queue.Handler{DB: appDB})
 	mux.Handle("/queue/", queue.Handler{DB: appDB})
@@ -118,6 +129,40 @@ func (s *Server) Close(ctx context.Context) error {
 	s.appDB.Close()
 	s.db.Close()
 	return err
+}
+
+// ssoVerifier builds the RBAC guard's SSO verifier from config. With an HS256 dev secret
+// it verifies OIDC id-tokens; unconfigured it returns DenyAll so privileged planes fail
+// closed (401) rather than open (SEC-05). Production wires an RS256 JWKS KeySource.
+func ssoVerifier(cfg config.Config) sso.Verifier {
+	if cfg.SSOHMACSecret == "" {
+		return sso.DenyAll{}
+	}
+	return sso.OIDCVerifier{
+		Issuer:   cfg.SSOIssuer,
+		Audience: cfg.SSOAudience,
+		Keys:     sso.StaticHMAC(cfg.SSOHMACSecret),
+	}
+}
+
+// storeRoleSource adapts the tenant-scoped role store to rbac.RoleSource: it resolves a
+// subject's roles under RLS (ADR-0015), so a subject in another tenant is invisible and
+// an unprovisioned subject yields none (least privilege).
+type storeRoleSource struct{ db *store.DB }
+
+func (s storeRoleSource) Roles(ctx context.Context, tenant, subject string) ([]rbac.Role, error) {
+	var roles []rbac.Role
+	err := store.WithTenant(ctx, s.db.Pool, tenant, func(tx pgx.Tx) error {
+		strs, e := store.RolesForSubject(ctx, tx, subject)
+		if e != nil {
+			return e
+		}
+		for _, r := range strs {
+			roles = append(roles, rbac.Role(r))
+		}
+		return nil
+	})
+	return roles, err
 }
 
 // correlationMiddleware ensures every request carries a correlation id (honouring

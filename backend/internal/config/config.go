@@ -16,6 +16,14 @@ type Config struct {
 	TikaURL        string // Apache Tika base URL
 	ClamAVAddr     string // ClamAV daemon host:port
 	HTTPAddr       string // listen address for the health/API server
+
+	// SSO/OIDC for the RBAC guard (M11 FR-M11-04). Optional: when unset the privileged
+	// planes fail closed (every request 401) rather than opening — an unconfigured IdP
+	// denies privileged access, never bypasses it (SEC-05). SSOHMACSecret enables an
+	// HS256 dev verifier; production wires an RS256 JWKS source (ADR-0015 / ISSUE-0064).
+	SSOIssuer     string
+	SSOAudience   string
+	SSOHMACSecret string
 }
 
 // Load reads configuration from the environment and fails fast when a required
@@ -29,6 +37,9 @@ func Load() (Config, error) {
 		TikaURL:        os.Getenv("TIKA_URL"),
 		ClamAVAddr:     os.Getenv("CLAMAV_ADDR"),
 		HTTPAddr:       getenv("HTTP_ADDR", ":8080"),
+		SSOIssuer:      os.Getenv("SSO_ISSUER"),
+		SSOAudience:    os.Getenv("SSO_AUDIENCE"),
+		SSOHMACSecret:  os.Getenv("SSO_HMAC_SECRET"),
 	}
 	if c.AppDatabaseURL == "" {
 		c.AppDatabaseURL = c.DatabaseURL
