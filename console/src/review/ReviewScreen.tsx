@@ -11,7 +11,7 @@ export function ReviewScreen({ client, conversationId, agent: _agent, onDone }: 
   if (error) return <p role="alert">{error}</p>;
   if (!surface) return <p>Loading…</p>;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: "var(--pane-gap)", height: "100%" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: "var(--pane-gap)", height: "100%", position: "relative" }}>
       <ThreadPane customerMessage={surface.customer_message} thread={surface.thread} />
       <div aria-label="draft">
         {!surface.draft_available

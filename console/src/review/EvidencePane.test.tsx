@@ -14,6 +14,12 @@ test("shows degraded booking and the autonomy reasons", () => {
   expect(screen.getByText(/booking data unavailable/i)).toBeInTheDocument();
   expect(screen.getByText(/G05 confidence below threshold/)).toBeInTheDocument();
 });
+test("renders autonomy outcome and route", () => {
+  render(<EvidencePane surface={surface} />);
+  const autonomyHeading = screen.getByRole("heading", { name: /Autonomy/ });
+  expect(autonomyHeading.textContent).toContain("human_review");
+  expect(autonomyHeading.textContent).toContain("review");
+});
 test("renders a source list", () => {
   render(<EvidencePane surface={surface} />);
   expect(screen.getByText("FAQ")).toBeInTheDocument();

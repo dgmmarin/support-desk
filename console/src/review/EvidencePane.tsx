@@ -4,7 +4,7 @@ export function EvidencePane({ surface }: { surface: ReviewSurface }) {
   return (
     <aside aria-label="evidence" style={{ overflow: "auto", display: "grid", gap: "var(--pane-gap)" }}>
       <section aria-label="autonomy">
-        <h3>Autonomy{autonomy.outcome ? ` — ${autonomy.outcome}` : ""}{autonomy.confidence_band ? ` · ${autonomy.confidence_band}` : ""}</h3>
+        <h3>Autonomy{autonomy.outcome ? ` — ${autonomy.outcome}` : ""}{autonomy.route ? ` → ${autonomy.route}` : ""}{autonomy.confidence_band ? ` · ${autonomy.confidence_band}` : ""}</h3>
         {autonomy.auto_send_eligible
           ? <p>Auto-send eligible.</p>
           : <ul>{(autonomy.reasons_for_agent ?? []).map((r, i) => <li key={i}>{r}</li>)}</ul>}
