@@ -28,6 +28,7 @@ const (
 	SectionExclusions = "exclusions"
 	SectionCost       = "cost"
 	SectionRetention  = "retention"
+	SectionMailboxes  = "mailboxes"
 )
 
 // configChangeKind is the change_log kind under which every tenant-config change is
@@ -261,6 +262,44 @@ func GetRetention(ctx context.Context, tx pgx.Tx) (Retention, bool, error) {
 // SetRetention upserts the tenant's retention config.
 func SetRetention(ctx context.Context, tx pgx.Tx, actor string, r Retention) (int, error) {
 	return setTyped(ctx, tx, SectionRetention, actor, r)
+}
+
+// MailboxConfig is one tenant mailbox + its sending identity and mail-provider
+// transport config (M1, ADR-0014/0026), read by the mail-provider wiring (ISSUE-0053).
+// Provider is one of the mailprovider kinds ("imap_smtp"|"graph"|"gmail"). Secrets are
+// NOT stored here: CredentialRef points at the secrets vault (FR-M11 secrets), so a
+// config read never exposes a password/token. Coexistence toggles labelling (FR-M1-16).
+type MailboxConfig struct {
+	MailboxID     string `json:"mailbox_id"`
+	Address       string `json:"address"`        // the mailbox's own email address
+	Provider      string `json:"provider"`       // imap_smtp | graph | gmail
+	Host          string `json:"host,omitempty"` // SMTP/API host (must be egress-allowlisted, SEC-08)
+	Port          int    `json:"port,omitempty"`
+	FromAddress   string `json:"from_address"` // sending identity address
+	FromDisplay   string `json:"from_display,omitempty"`
+	Signature     string `json:"signature,omitempty"`
+	CredentialRef string `json:"credential_ref,omitempty"` // vault handle — never a secret in cleartext
+	Coexistence   bool   `json:"coexistence,omitempty"`    // leave in place + label (ADR-0026)
+}
+
+// Mailboxes is the tenant's set of mailboxes/identities (FR-M1-02). Fail-closed default
+// is EMPTY — a tenant with no configured mailbox connects to nothing (no accidental
+// send from an unconfigured identity).
+type Mailboxes struct {
+	Mailboxes []MailboxConfig `json:"mailboxes"`
+}
+
+// GetMailboxes returns the active tenant's mailbox/identity config, or empty when unset.
+// Tenant-scoped by RLS (ADR-0015): a tenant never reads another tenant's mailboxes.
+func GetMailboxes(ctx context.Context, tx pgx.Tx) (Mailboxes, bool, error) {
+	var m Mailboxes
+	found, err := getTyped(ctx, tx, SectionMailboxes, &m)
+	return m, found, err
+}
+
+// SetMailboxes upserts the active tenant's mailbox/identity config.
+func SetMailboxes(ctx context.Context, tx pgx.Tx, actor string, m Mailboxes) (int, error) {
+	return setTyped(ctx, tx, SectionMailboxes, actor, m)
 }
 
 // TenantConfig is the aggregate typed view — a single read of every section, each at its

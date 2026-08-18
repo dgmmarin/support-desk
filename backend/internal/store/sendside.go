@@ -32,6 +32,11 @@ func InsertDraft(ctx context.Context, tx pgx.Tx, d Draft) (string, error) {
 }
 
 // SentMessage is an immutable record of a dispatched reply (INV-2).
+//
+// Subject/InReplyTo/References are transport-only carriers for the mail provider seam
+// (FR-M1-10): they let the Deliver stage hand threading to the MailProvider so the
+// reply threads in the customer's client. They are NOT persisted columns — the
+// inserts below use the fixed column set — so adding them changes no schema.
 type SentMessage struct {
 	ID             string
 	ConversationID string
@@ -41,6 +46,10 @@ type SentMessage struct {
 	DisclosureText string
 	AIGenerated    bool // machine-readable AI marking on the message (FR-M13-02, Art.50)
 	DeliveryStatus string
+
+	Subject    string   `json:"-"` // transport-only (FR-M1-10) — not persisted
+	InReplyTo  string   `json:"-"` // transport-only (FR-M1-10) — not persisted
+	References []string `json:"-"` // transport-only (FR-M1-10) — not persisted
 }
 
 // InsertSentMessage appends a sent-message record for the active tenant.

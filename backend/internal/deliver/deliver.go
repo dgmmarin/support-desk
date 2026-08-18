@@ -60,6 +60,12 @@ type Input struct {
 	Model          string `json:"model,omitempty"`          // pinned model id (MOD-06)
 	ModelVersion   string `json:"model_version,omitempty"`  // pinned model version
 	PromptVersion  string `json:"prompt_version,omitempty"` // pinned prompt version (LEG-09)
+
+	// Threading carriers for the mail provider (FR-M1-10): the preserved subject and
+	// parent references so the reply threads in the customer's client. Transport-only.
+	Subject    string   `json:"subject,omitempty"`
+	InReplyTo  string   `json:"in_reply_to,omitempty"`
+	References []string `json:"references,omitempty"`
 }
 
 // aiSendable is the deterministic send-side transparency gate (M13, ADR-0024): an
@@ -147,6 +153,8 @@ func (d *Deliver) Serve(ctx context.Context, js jetstream.JetStream, logger *slo
 				ID: id, ConversationID: env.ConversationID, DraftID: env.DraftID,
 				Content: in.Content, DisclosureText: in.DisclosureText, AIGenerated: in.AIGenerated,
 				Sender: "system", DeliveryStatus: "sent",
+				// Threading carriers for the mail provider seam (FR-M1-10).
+				Subject: in.Subject, InReplyTo: in.InReplyTo, References: in.References,
 			})
 		})
 		if err != nil {

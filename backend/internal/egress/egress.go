@@ -50,6 +50,13 @@ func (a Allowlist) Allowed(rawurl string) (bool, string) {
 	return true, ""
 }
 
+// AllowedHost reports whether a bare host (no scheme) is on the allowlist. Used by
+// non-HTTP transports — SMTP/IMAP mail providers — which must also be allowlisted
+// before any dial (SEC-08).
+func (a Allowlist) AllowedHost(host string) bool {
+	return a.hosts[strings.ToLower(strings.TrimSpace(host))]
+}
+
 // Fetcher performs HTTP GETs, enforcing the allowlist before any network call.
 type Fetcher struct {
 	Allow Allowlist
