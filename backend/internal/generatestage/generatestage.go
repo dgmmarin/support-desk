@@ -13,6 +13,7 @@ import (
 
 	"tourdesk/internal/antifab"
 	"tourdesk/internal/citation"
+	"tourdesk/internal/disclosure"
 	"tourdesk/internal/generate"
 	"tourdesk/internal/pipeline"
 )
@@ -28,23 +29,32 @@ type StageInput struct {
 	Voice            generate.Voice    `json:"voice,omitempty"`     // tenant voice profile (FR-M5-04)
 	VoiceSet         bool              `json:"voice_set"`           // tenant configured a voice (FR-M5-04)
 	Allowlist        antifab.Allowlist `json:"allowlist,omitempty"` // anti-fabrication allowlist (FR-M5-08)
+
+	// Personalisation (FR-M5-10/11), gated by the disclosure matrix (ADR-0011, G08).
+	BookingFacts      []generate.BookingFact `json:"booking_facts,omitempty"`
+	Documents         []generate.DocumentRef `json:"documents,omitempty"`
+	VerificationLevel disclosure.Level       `json:"verification_level,omitempty"`
+	SenderIsContact   bool                   `json:"sender_is_contact,omitempty"`
+	BookingDegraded   bool                   `json:"booking_degraded,omitempty"`
 }
 
 // GeneratedEvent carries the draft downstream to Verify / the gate. Citations are
 // the per-claim machine-resolvable citations (FR-M5-02); UncertaintyNotes + Partial
 // carry the explicit partial-answer marking (FR-M5-03) for the console and gate.
 type GeneratedEvent struct {
-	CorrelationID       string              `json:"correlation_id"`
-	Content             string              `json:"content"`
-	Language            string              `json:"language,omitempty"`
-	Abstained           bool                `json:"abstained"`
-	GuardPass           bool                `json:"guard_pass"`
-	DraftOnly           bool                `json:"draft_only"`
-	Partial             bool                `json:"partial"`
-	FabricationStripped bool                `json:"fabrication_stripped"` // FR-M5-08
-	UsedCanonical       bool                `json:"used_canonical"`
-	Citations           []citation.Citation `json:"citations,omitempty"`
-	UncertaintyNotes    []string            `json:"uncertainty_notes,omitempty"`
+	CorrelationID       string                 `json:"correlation_id"`
+	Content             string                 `json:"content"`
+	Language            string                 `json:"language,omitempty"`
+	Abstained           bool                   `json:"abstained"`
+	GuardPass           bool                   `json:"guard_pass"`
+	DraftOnly           bool                   `json:"draft_only"`
+	Partial             bool                   `json:"partial"`
+	FabricationStripped bool                   `json:"fabrication_stripped"` // FR-M5-08
+	Personalized        bool                   `json:"personalized"`         // FR-M5-10
+	UsedCanonical       bool                   `json:"used_canonical"`
+	Citations           []citation.Citation    `json:"citations,omitempty"`
+	UncertaintyNotes    []string               `json:"uncertainty_notes,omitempty"`
+	Attachments         []generate.DocumentRef `json:"attachments,omitempty"` // FR-M5-11, gated by level
 }
 
 // Serve runs the Generate stage. verifySubject receives drafts to verify;
@@ -62,15 +72,20 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, svc
 			return pipeline.Decision{}, err // fail closed → human
 		}
 		d, err := svc.Draft(hctx, generate.Input{
-			Query:            in.Query,
-			Chunks:           in.Chunks,
-			Language:         in.Language,
-			DisclosureText:   in.DisclosureText,
-			Sourced:          in.Sourced,
-			ApprovedLanguage: in.ApprovedLanguage,
-			Voice:            in.Voice,
-			VoiceSet:         in.VoiceSet,
-			Allowlist:        in.Allowlist,
+			Query:             in.Query,
+			Chunks:            in.Chunks,
+			Language:          in.Language,
+			DisclosureText:    in.DisclosureText,
+			Sourced:           in.Sourced,
+			ApprovedLanguage:  in.ApprovedLanguage,
+			Voice:             in.Voice,
+			VoiceSet:          in.VoiceSet,
+			Allowlist:         in.Allowlist,
+			BookingFacts:      in.BookingFacts,
+			Documents:         in.Documents,
+			VerificationLevel: in.VerificationLevel,
+			SenderIsContact:   in.SenderIsContact,
+			BookingDegraded:   in.BookingDegraded,
 		})
 		if err != nil {
 			return pipeline.Decision{}, err // generator outage → fail to human (MOD-05)
@@ -84,9 +99,11 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, svc
 			DraftOnly:           d.DraftOnly,
 			Partial:             d.Partial,
 			FabricationStripped: d.FabricationStripped,
+			Personalized:        d.Personalized,
 			UsedCanonical:       d.UsedCanonical,
 			Citations:           d.Citations,
 			UncertaintyNotes:    d.UncertaintyNotes,
+			Attachments:         d.Attachments,
 		}
 		subject := verifySubject
 		if d.Abstained {

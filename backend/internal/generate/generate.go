@@ -20,6 +20,7 @@ import (
 	"tourdesk/internal/antifab"
 	"tourdesk/internal/citation"
 	"tourdesk/internal/commitment"
+	"tourdesk/internal/disclosure"
 	"tourdesk/internal/llm"
 )
 
@@ -67,6 +68,28 @@ type Voice struct {
 	Signature string `json:"signature,omitempty"`
 }
 
+// BookingFact is one live, connector-sourced booking detail the draft may be
+// personalised with (FR-M5-10). Value came from the reservation connector or a human
+// — never fabricated (commitment guardrail, ADR-0006). Class governs whether it may be
+// disclosed at the case's verification level (ADR-0011, gate G08); FieldPath is the
+// system-of-record path its citation resolves to (Citation.BookingFieldPath, FR-M5-02).
+type BookingFact struct {
+	FieldPath string               // e.g. "booking.flight.departure"
+	Label     string               // customer-facing lead-in, e.g. "Your flight departs at"
+	Value     string               // the exact connector value (never invented)
+	Class     disclosure.DataClass // disclosure class this fact belongs to (ADR-0011)
+}
+
+// DocumentRef is an attachable reservation document — ticket, voucher, invoice
+// (FR-M5-11). It is metadata only; the blob is fetched and malware-scanned at the
+// attach/deliver boundary (SEC-07). Attachment is gated by the verification level.
+type DocumentRef struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind,omitempty"`
+	Name      string `json:"name,omitempty"`
+	FieldPath string `json:"field_path,omitempty"`
+}
+
 // Input is the generation context (spec §3).
 type Input struct {
 	Query            string
@@ -78,6 +101,13 @@ type Input struct {
 	Voice            Voice             // tenant voice profile (FR-M5-04)
 	VoiceSet         bool              // tenant configured a voice; unset → draft-only (FR-M5-04)
 	Allowlist        antifab.Allowlist // anti-fabrication source of truth (FR-M5-08)
+
+	// Personalisation (FR-M5-10/11), gated by the disclosure matrix (ADR-0011, G08).
+	BookingFacts      []BookingFact    // live booking facts to merge in (FR-M5-10)
+	Documents         []DocumentRef    // reservation documents to attach (FR-M5-11)
+	VerificationLevel disclosure.Level // the case's identity assurance (ADR-0011)
+	SenderIsContact   bool             // sender is a recorded contact on the booking (FR-M2-06)
+	BookingDegraded   bool             // reservation connector unavailable → no personalisation (FR-M12-04)
 }
 
 // Draft is the stage output. Abstained/GuardPass/DraftOnly are read by the gate.
@@ -90,9 +120,11 @@ type Draft struct {
 	DraftOnly           bool // unapproved language / missing disclosure → never auto-send
 	Partial             bool // a claim could not be grounded → explicitly marked (FR-M5-03)
 	FabricationStripped bool // a non-allowlisted contact detail was removed (FR-M5-08)
+	Personalized        bool // wove in ≥1 disclosable live booking fact (FR-M5-10)
 	ModelVersion        string
 	Citations           []citation.Citation // per-claim machine-resolvable citations (FR-M5-02)
 	UncertaintyNotes    []string            // ungrounded/partial markers for the agent (FR-M5-03)
+	Attachments         []DocumentRef       // reservation documents to attach (FR-M5-11, gated)
 }
 
 // Service produces drafts from a Generator.
@@ -144,6 +176,14 @@ func (s Service) Draft(ctx context.Context, in Input) (Draft, error) {
 		}
 	}
 
+	// FR-M5-10/11 personalisation merge — weave disclosable live booking facts and
+	// attach documents, both gated by the verification level (ADR-0011). Runs on the
+	// grounded body before signature/disclosure so the personal claim sits inside the
+	// answer. Disclosed booking-fact values are connector-sourced, so they extend the
+	// commitment-guard sourced set (FR-M5-06).
+	sourced := append([]string(nil), in.Sourced...)
+	sourced = append(sourced, personalize(&d, in)...)
+
 	// FR-M5-04 voice signature — appended deterministically (config-sourced, trusted).
 	if sig := strings.TrimSpace(in.Voice.Signature); sig != "" {
 		d.Content = strings.TrimRight(d.Content, "\n") + "\n\n" + sig
@@ -166,9 +206,63 @@ func (s Service) Draft(ctx context.Context, in Input) (Draft, error) {
 		d.DraftOnly = true
 	}
 
-	// FR-M5-06 deterministic commitment guard.
-	d.GuardPass = commitmentsSourced(d.Content, in.Sourced)
+	// FR-M5-06 deterministic commitment guard (including disclosed booking facts).
+	d.GuardPass = commitmentsSourced(d.Content, sourced)
 	return d, nil
+}
+
+// personalize merges live booking facts into the draft (FR-M5-10) and attaches
+// reservation documents (FR-M5-11), both gated by the case verification level and the
+// disclosure matrix (ADR-0011, gate G08). It is fail-closed: a degraded connector or a
+// verification level below the matrix requirement discloses NOTHING personal — the
+// personal part is left explicitly for the agent (Partial + a note), never fabricated
+// (FR-M12-04). Every disclosed fact becomes a claim with a machine-resolvable
+// BookingFieldPath citation (FR-M5-02). Returns the disclosed fact values so the
+// commitment guard treats a connector-sourced amount as legitimately sourced (FR-M5-06).
+func personalize(d *Draft, in Input) []string {
+	// FR-M5-10 fail-closed: connector unavailable ⇒ answer the general part only and
+	// mark the personal part for the agent; never guess a booking fact (FR-M12-04).
+	if in.BookingDegraded {
+		if len(in.BookingFacts) > 0 || len(in.Documents) > 0 {
+			d.Partial = true
+			d.UncertaintyNotes = append(d.UncertaintyNotes,
+				"booking facts unavailable (reservation connector degraded) — personal details left for the agent")
+		}
+		return nil
+	}
+
+	var sourced []string
+	for _, f := range in.BookingFacts {
+		if !disclosure.CanDisclose(f.Class, in.VerificationLevel, in.SenderIsContact) {
+			// ADR-0011 fail-closed: below the matrix requirement (or not a recorded
+			// contact — FR-M2-06) ⇒ withhold, mark for the agent; never disclose.
+			d.Partial = true
+			d.UncertaintyNotes = append(d.UncertaintyNotes,
+				"personal booking detail withheld (verification level insufficient): "+f.Label)
+			continue
+		}
+		span := strings.TrimSpace(f.Label + " " + f.Value)
+		if !strings.HasSuffix(span, ".") {
+			span += "."
+		}
+		d.Content = strings.TrimRight(d.Content, "\n") + " " + span
+		d.Citations = append(d.Citations, citation.Citation{ClaimSpan: span, BookingFieldPath: f.FieldPath})
+		d.Personalized = true
+		sourced = append(sourced, f.Value)
+	}
+
+	// FR-M5-11 attach reservation documents subject to the verification level (G08).
+	for _, doc := range in.Documents {
+		if disclosure.CanDisclose(disclosure.Documents, in.VerificationLevel, in.SenderIsContact) {
+			d.Attachments = append(d.Attachments, doc)
+			continue
+		}
+		// Below the matrix requirement ⇒ do NOT attach; request identity confirmation.
+		d.Partial = true
+		d.UncertaintyNotes = append(d.UncertaintyNotes,
+			"reservation document not attached (verification level insufficient) — ask the customer to confirm their identity: "+doc.Name)
+	}
+	return sourced
 }
 
 // buildSystem returns the generator system prompt, extended with the tenant voice
@@ -278,7 +372,10 @@ func splitSentences(text string) []string {
 	return out
 }
 
-var currencyRe = regexp.MustCompile(`[€$£]\s?\d[\d.,]*`)
+// currencyRe matches a currency amount, capturing internal separators (€1,234.56)
+// but ending on a digit so a sentence-final period is left out — "€120." extracts as
+// "€120", matching the value a connector-sourced fact carries into the sourced set.
+var currencyRe = regexp.MustCompile(`[€$£]\s?\d(?:[\d.,]*\d)?`)
 
 // commitmentsSourced is the deterministic guard (FR-M5-06): a draft with no
 // commitment passes; a draft with a commitment passes only when its values are
