@@ -13,6 +13,7 @@ package identify
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -170,6 +171,19 @@ func Identify(ctx context.Context, text, senderEmail string, dmarcPass bool, con
 	res.Evidence["sender_is_contact"] = boolStr(res.SenderIsContact)
 	res.Evidence["matches"] = itoa(len(byID))
 	return res, nil
+}
+
+// Override applies an agent manual override (FR-M2-08): a human vouches for an
+// identity the automated levels couldn't reach, raising the case to human-verified.
+// It is monotonic — the result is the max of the current level and human-verified
+// (disclosure.EffectiveLevel), so it can only raise, never downgrade (SR-M2-01).
+// Fail-closed: an override without both an actor and a reason is rejected and the
+// level is returned unchanged; the caller must persist the attribution (FR-M2-07).
+func Override(current disclosure.Level, actor, reason string) (disclosure.Level, error) {
+	if strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
+		return current, fmt.Errorf("identify: manual override requires an actor and a reason (FR-M2-08)")
+	}
+	return disclosure.EffectiveLevel(current, disclosure.HumanVerified), nil
 }
 
 func keys(m map[string]bool) []string {

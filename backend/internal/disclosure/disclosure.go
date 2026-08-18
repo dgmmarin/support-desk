@@ -15,6 +15,33 @@ const (
 	HumanVerified              // an agent verified identity
 )
 
+// String renders an audit-legible name for the level (FR-M2-07 evidence log).
+func (l Level) String() string {
+	switch l {
+	case Unverified:
+		return "unverified"
+	case Weak:
+		return "weak"
+	case Strong:
+		return "strong"
+	case HumanVerified:
+		return "human_verified"
+	default:
+		return "unknown"
+	}
+}
+
+// EffectiveLevel combines two verification levels into the higher one. This is the
+// monotonic level model (SR-M2-01, ADR-0011): a manual override (FR-M2-08) raises a
+// case to human-verified by combining with the current level, so identity can only
+// ever be raised, never silently downgraded.
+func EffectiveLevel(a, b Level) Level {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // DataClass is a class of information a reply might disclose.
 type DataClass string
 

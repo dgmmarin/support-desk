@@ -43,7 +43,8 @@ type Chain struct {
 	Sent     SentMessage
 	Draft    Draft
 	Gate     GateEvaluation
-	Reviews  []ReviewAction // human edits/overrides on the draft (M8, INV-5)
+	Reviews  []ReviewAction     // human edits/overrides on the draft (M8, INV-5)
+	Identity []IdentityDecision // identity/verification decisions on the conversation (M2, INV-5)
 	Messages []Message
 }
 
@@ -87,6 +88,12 @@ func ReconstructChain(ctx context.Context, tx pgx.Tx, sentMessageID string) (Cha
 		}
 		c.Reviews = reviews
 	}
+
+	identity, err := GetIdentityDecisions(ctx, tx, c.Sent.ConversationID)
+	if err != nil {
+		return Chain{}, fmt.Errorf("store: reconstruct: identity decisions: %w", err)
+	}
+	c.Identity = identity
 
 	msgs, err := GetMessagesByConversation(ctx, tx, c.Sent.ConversationID)
 	if err != nil {

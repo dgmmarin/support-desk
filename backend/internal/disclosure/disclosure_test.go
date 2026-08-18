@@ -67,3 +67,38 @@ func TestPublicAlwaysDisclosable(t *testing.T) {
 		t.Fatal("public info should always be disclosable")
 	}
 }
+
+// test_effective_level_monotonic (SR-M2-01, ADR-0011): the combined level is the
+// max — a manual override can only raise, never downgrade.
+func TestEffectiveLevelMonotonic(t *testing.T) {
+	levels := []Level{Unverified, Weak, Strong, HumanVerified}
+	for _, a := range levels {
+		for _, b := range levels {
+			got := EffectiveLevel(a, b)
+			if got < a || got < b {
+				t.Fatalf("EffectiveLevel(%v,%v) = %v downgraded below an input", a, b, got)
+			}
+			if a >= b && got != a || b > a && got != b {
+				t.Fatalf("EffectiveLevel(%v,%v) = %v, want max", a, b, got)
+			}
+		}
+	}
+	// An override to human-verified always reaches the top from any level.
+	for _, a := range levels {
+		if EffectiveLevel(a, HumanVerified) != HumanVerified {
+			t.Fatalf("override from %v must reach human-verified", a)
+		}
+	}
+}
+
+// test_level_string: each level renders a stable audit-legible name.
+func TestLevelString(t *testing.T) {
+	cases := map[Level]string{
+		Unverified: "unverified", Weak: "weak", Strong: "strong", HumanVerified: "human_verified",
+	}
+	for lvl, want := range cases {
+		if got := lvl.String(); got != want {
+			t.Fatalf("Level(%d).String() = %q, want %q", lvl, got, want)
+		}
+	}
+}

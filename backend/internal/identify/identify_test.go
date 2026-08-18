@@ -88,6 +88,39 @@ func TestConnectorDownDegraded(t *testing.T) {
 	}
 }
 
+// test_FR_M2_08_override_requires_attribution — an unattributed override is
+// rejected (fail-closed) and the level is left unchanged; never a silent raise.
+func TestFRM208OverrideRequiresAttribution(t *testing.T) {
+	for _, tc := range []struct{ actor, reason string }{
+		{"", "impersonation confirmed"}, {"agent-7", ""}, {"  ", "x"}, {"agent-7", "   "},
+	} {
+		got, err := Override(disclosure.Strong, tc.actor, tc.reason)
+		if err == nil {
+			t.Fatalf("override(actor=%q reason=%q) must be rejected", tc.actor, tc.reason)
+		}
+		if got != disclosure.Strong {
+			t.Fatalf("rejected override must leave level unchanged, got %v", got)
+		}
+	}
+}
+
+// test_FR_M2_08_override_raises_to_human_verified_monotonic — a valid, attributed
+// override reaches human-verified from any starting level and never downgrades.
+func TestFRM208OverrideRaisesToHumanVerifiedMonotonic(t *testing.T) {
+	for _, start := range []disclosure.Level{disclosure.Unverified, disclosure.Weak, disclosure.Strong, disclosure.HumanVerified} {
+		got, err := Override(start, "agent-7", "spoke to customer on phone")
+		if err != nil {
+			t.Fatalf("valid override from %v errored: %v", start, err)
+		}
+		if got != disclosure.HumanVerified {
+			t.Fatalf("override from %v = %v, want human_verified", start, got)
+		}
+		if got < start {
+			t.Fatalf("override downgraded %v -> %v", start, got)
+		}
+	}
+}
+
 // test_FR_M2_01_extract_candidates — extract a booking reference from the body.
 func TestExtractCandidates(t *testing.T) {
 	c := Extract("Hi, my booking reference is TD-12345, dates 2026-07-01.", "me@x.com")
