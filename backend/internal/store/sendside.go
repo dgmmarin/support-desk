@@ -99,6 +99,24 @@ func InsertSentMessageOnce(ctx context.Context, tx pgx.Tx, s SentMessage) (id st
 	return id, false, nil
 }
 
+// ConversationHasAutoSend reports whether the conversation carries a prior
+// autonomous reply — a system-sent, AI-generated SentMessage (what the Deliver stage
+// writes for a gate auto_send). It is the marker that a customer follow-up is a
+// reply-to-an-auto-sent answer (FR-M6-11). Tenant-scoped via RLS: another tenant's
+// sends are invisible, so a follow-up never escalates on a cross-tenant send.
+func ConversationHasAutoSend(ctx context.Context, tx pgx.Tx, conversationID string) (bool, error) {
+	var exists bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM sent_messages
+			WHERE conversation_id = $1 AND sender = 'system' AND ai_generated = true
+		)`, conversationID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("store: conversation has auto-send: %w", err)
+	}
+	return exists, nil
+}
+
 // GetSentMessageByDraft returns the sent message for a draft, if any.
 func GetSentMessageByDraft(ctx context.Context, tx pgx.Tx, draftID string) (SentMessage, bool, error) {
 	var s SentMessage

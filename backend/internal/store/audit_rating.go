@@ -37,3 +37,20 @@ func CountRecentAuditRatings(ctx context.Context, tx pgx.Tx, intent string, wind
 	}
 	return failures, total, nil
 }
+
+// CountAuditRatings returns (correct, total) over ALL audit-rating review actions for
+// intent under the active tenant — the lifetime measured-criteria source for
+// trust-ladder promotion (FR-M6-10, CAL-02/03). It is the unbounded sibling of
+// CountRecentAuditRatings (which windows the breaker feed): promotion gates on the
+// full audited history and its precision, not a rolling window. Tenant-scoped via RLS,
+// so one tenant's ratings never inflate another's promotion evidence (ADR-0015).
+func CountAuditRatings(ctx context.Context, tx pgx.Tx, intent string) (correct, total int, err error) {
+	err = tx.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE diff->>'rating' = 'correct')::int, count(*)::int
+		FROM review_actions
+		WHERE action = 'audit_rating' AND diff->>'intent' = $1`, intent).Scan(&correct, &total)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: count audit ratings: %w", err)
+	}
+	return correct, total, nil
+}

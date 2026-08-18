@@ -72,7 +72,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0040](ISSUE-0040-m5-voice-anti-fabrication.md) | M5 voice profile application + anti-fabrication resolution (links/phones/refs from config only) | done | M5 | M | 0027, 0037 |
 | [0041](ISSUE-0041-m13-ai-disclosure.md) | AI-disclosure config + machine-readable AI marking + per-message model/version log | done | M13 | M | 0037, 0012 |
 | [0042](ISSUE-0042-m6-gate-human-exclusion.md) | Gate: no auto-send when a human already replied / recipient on exclusion list or requested human | done | M6 | M | 0018, 0008, 0037 |
-| [0043](ISSUE-0043-m6-trust-ladder-promotion.md) | Trust-ladder promotion workflow (supervisor action + measured criteria) + auto-send correction/reply-escalation | todo | M6 | M | 0017, 0020, 0010 |
+| [0043](ISSUE-0043-m6-trust-ladder-promotion.md) | Trust-ladder promotion workflow (supervisor action + measured criteria) + auto-send correction/reply-escalation | done | M6 | M | 0017, 0020, 0010 |
 | [0044](ISSUE-0044-m2-identity-audit-override.md) | Identity-decision audit log + agent manual override → human-verified | todo | M2 | M | 0025, 0013 |
 | [0045](ISSUE-0045-m12-reservation-connector.md) | Reservation Connector Interface (10-method contract) + degraded mode + reference/generic/file-drop connectors + short-TTL cache | todo | M12 | M | 0025 |
 | [0046](ISSUE-0046-m5-booking-personalization.md) | M5 booking-fact personalization + reservation-document attachment gated by verification level | todo | M5 | M | 0045, 0021, 0039 |
