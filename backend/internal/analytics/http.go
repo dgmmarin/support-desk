@@ -121,6 +121,18 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rep, e := Knowledge(r.Context(), tx, win, now, gaps)
 			body = rep
 			return e
+		case "usage":
+			// FR-M11-05: per-tenant metered set (conversations/messages/auto-sends/storage real;
+			// tokens gapped). Windowed like the M10 aggregates; scopeless FAILS (require_tenant).
+			rep, e := Usage(r.Context(), tx, win, now)
+			body = rep
+			return e
+		case "health":
+			// FR-M11-06: current-state control-plane status (kill switch + breakers) with the
+			// heartbeat dimensions gapped. No window; scopeless FAILS (require_tenant).
+			rep, e := Health(r.Context(), tx)
+			body = rep
+			return e
 		case "compliance":
 			// FR-M10-07: a read-only surface over the M13/M6 immutable logs. Incomplete
 			// sections name their missing source (never silently partial); a scopeless

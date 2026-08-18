@@ -94,7 +94,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0062](ISSUE-0062-m10-compliance-reports.md) | Compliance reports view (complaint register, disclosure log, data-request log, autonomy-policy history) | done | M10 | M | 0060, 0041, 0017, 0033 |
 | [0063](ISSUE-0063-m11-onboarding-sandbox.md) | Onboarding wizard orchestration + sandbox/test replay mode | done | M11 | M | 0037, 0053 |
 | [0064](ISSUE-0064-m11-rbac-sso.md) | RBAC + SSO/SAML/OIDC | done | M11 | M | 0037 |
-| [0065](ISSUE-0065-m11-usage-metering-health.md) | Usage metering (conversations/messages/auto-sends/tokens/storage) + tenant health/status API | todo | M11 | M | 0031, 0053 |
+| [0065](ISSUE-0065-m11-usage-metering-health.md) | Usage metering (conversations/messages/auto-sends/tokens/storage) + tenant health/status API | done | M11 | M | 0031, 0053 |
 | [0066](ISSUE-0066-m11-vendor-support-access.md) | Vendor support access: tenant-granted, time-boxed, purpose-logged elevation | todo | M11 | M | 0037, 0013 |
 
 **Next id:** 0067
