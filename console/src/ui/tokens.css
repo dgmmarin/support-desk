@@ -1,0 +1,10 @@
+:root {
+  --bg: #ffffff; --fg: #14161a; --muted: #5b6472; --line: #d7dce3;
+  --accent: #1f6feb; --danger: #b42318; --warn: #9a6700; --ok: #067647;
+  --focus: #1f6feb; --radius: 6px; --pane-gap: 12px;
+  font-family: system-ui, sans-serif; color: var(--fg); background: var(--bg);
+}
+*:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1216; --fg:#e6e9ee; --muted:#9aa4b2; --line:#2a313b; }
+}
