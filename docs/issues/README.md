@@ -78,7 +78,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0046](ISSUE-0046-m5-booking-personalization.md) | M5 booking-fact personalization + reservation-document attachment gated by verification level | done | M5 | M | 0045, 0021, 0039 |
 | [0047](ISSUE-0047-m4-knowledge-indexing.md) | Knowledge indexing: chunk/embed/index with full metadata + tenant/brand isolation + no-booking-data-in-index rule | done | M4 | M | 0026 |
 | [0048](ISSUE-0048-m4-knowledge-sources.md) | Knowledge sources: website crawl (robots/change-detect) + document upload (layout-aware) + structured feeds | done | M4 | M | 0047 |
-| [0049](ISSUE-0049-m4-canonical-browser-multilingual.md) | Canonical answers authored in-console + knowledge browser (search/usage/retire/review) + multilingual answering | todo | M4 | M | 0047, 0037 |
+| [0049](ISSUE-0049-m4-canonical-browser-multilingual.md) | Canonical answers authored in-console + knowledge browser (search/usage/retire/review) + multilingual answering | done | M4 | M | 0047, 0037 |
 | [0050](ISSUE-0050-m8-gap-mining.md) | Knowledge-gap mining (cluster abstain/low-conf/edited, rank by volume×cost) | todo | M8 | M | 0047, 0034 |
 | [0051](ISSUE-0051-m8-promotion-contradiction-tonebank.md) | Canonical-answer promotion + contradiction detection + tone-example bank | todo | M8 | M | 0049, 0034 |
 | [0052](ISSUE-0052-m10-knowledge-dashboard.md) | Knowledge analytics dashboard (coverage, gaps, stale, most/never-cited) | todo | M10 | M | 0047, 0032 |

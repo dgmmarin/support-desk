@@ -16,6 +16,7 @@ import (
 	"tourdesk/internal/clog"
 	"tourdesk/internal/config"
 	"tourdesk/internal/health"
+	"tourdesk/internal/knowledgebrowser"
 	"tourdesk/internal/store"
 )
 
@@ -67,6 +68,8 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 	})
 	// M10 read plane (read-only, tenant-scoped): /analytics/{operational,automation,quality,roi}.
 	mux.Handle("/analytics/", analytics.Handler{DB: appDB})
+	// M4 knowledge browser (tenant-scoped): /knowledge/{search,stale,retire}.
+	mux.Handle("/knowledge/", knowledgebrowser.Handler{DB: appDB})
 
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
