@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -9,26 +10,56 @@ import (
 )
 
 // Draft is a generated answer draft (mutable; superseded by later drafts).
+// Citations and Sources are the draft's grounding evidence (FR-M7-04, ADR-0007):
+// the per-claim machine-resolvable citations and the retrieved sources it rested on.
+// Both are opaque jsonb here — the review package decodes them into typed values —
+// and are NULL for drafts written before that evidence is captured.
 type Draft struct {
 	ID             string
 	ConversationID string
 	Content        string
 	Language       string
+	Citations      json.RawMessage // []citation.Citation
+	Sources        json.RawMessage // []review.EvidenceSource
 }
 
-// InsertDraft appends a draft for the active tenant and returns its id.
+// InsertDraft appends a draft for the active tenant and returns its id. Citations and
+// Sources are written when supplied (NULL otherwise), so callers that do not capture
+// grounding evidence are unaffected.
 func InsertDraft(ctx context.Context, tx pgx.Tx, d Draft) (string, error) {
 	var id string
 	err := tx.QueryRow(ctx, `
-		INSERT INTO drafts (tenant_id, conversation_id, content, language)
-		VALUES (cur_tenant(), $1, $2, $3)
+		INSERT INTO drafts (tenant_id, conversation_id, content, language, citations, sources)
+		VALUES (cur_tenant(), $1, $2, $3, $4::jsonb, $5::jsonb)
 		RETURNING id`,
-		d.ConversationID, d.Content, d.Language,
+		d.ConversationID, d.Content, d.Language, nullRaw(d.Citations), nullRaw(d.Sources),
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("store: insert draft: %w", err)
 	}
 	return id, nil
+}
+
+// GetLatestDraft returns the most recent draft on a conversation with its grounding
+// evidence (FR-M7-03/04), and whether one exists. Tenant-scoped by RLS. A conversation
+// with no draft yields ok=false — the review surface then shows the abstained/escalated
+// status instead of a fabricated draft (fail-closed).
+func GetLatestDraft(ctx context.Context, tx pgx.Tx, conversationID string) (Draft, bool, error) {
+	var d Draft
+	err := tx.QueryRow(ctx, `
+		SELECT id, conversation_id, content, coalesce(language,''), citations, sources
+		FROM drafts
+		WHERE conversation_id = $1
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`, conversationID).
+		Scan(&d.ID, &d.ConversationID, &d.Content, &d.Language, &d.Citations, &d.Sources)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Draft{}, false, nil
+	}
+	if err != nil {
+		return Draft{}, false, fmt.Errorf("store: get latest draft: %w", err)
+	}
+	return d, true, nil
 }
 
 // SentMessage is an immutable record of a dispatched reply (INV-2).

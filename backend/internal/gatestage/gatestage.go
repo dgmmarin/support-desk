@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"tourdesk/internal/confidence"
 	"tourdesk/internal/gate"
 	"tourdesk/internal/pipeline"
 	"tourdesk/internal/store"
@@ -52,7 +53,7 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, db 
 		res := gate.Evaluate(in)
 
 		if db != nil {
-			if err := persist(ctx, db, env, res); err != nil {
+			if err := persist(ctx, db, env, in, res); err != nil {
 				// No durable audit record ⇒ do not route (esp. not auto_send).
 				return pipeline.Decision{}, fmt.Errorf("gate: persist evaluation: %w", err)
 			}
@@ -61,11 +62,14 @@ func Serve(ctx context.Context, js jetstream.JetStream, logger *slog.Logger, db 
 	})
 }
 
-func persist(ctx context.Context, db *store.DB, env pipeline.Envelope, res gate.Result) error {
+func persist(ctx context.Context, db *store.DB, env pipeline.Envelope, in gate.Input, res gate.Result) error {
 	conditions, err := json.Marshal(res.Conditions)
 	if err != nil {
 		return err
 	}
+	// The agent-facing confidence band the gate saw at G05 (FR-M7-19, CAL-04) — the
+	// same composite confidence that gated the send, banded for the console.
+	band := string(confidence.BandOf(in.Confidence))
 	return store.WithTenant(ctx, db.Pool, env.TenantID, func(tx pgx.Tx) error {
 		_, e := store.InsertGateEvaluation(ctx, tx, store.GateEvaluation{
 			ConversationID: env.ConversationID,
@@ -73,6 +77,7 @@ func persist(ctx context.Context, db *store.DB, env pipeline.Envelope, res gate.
 			Outcome:        string(res.Outcome),
 			Route:          string(res.Route),
 			Conditions:     conditions,
+			ConfidenceBand: band,
 		})
 		return e
 	})

@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"tourdesk/internal/deliver"
+	"tourdesk/internal/reservation"
 	"tourdesk/internal/store"
 )
 
@@ -28,6 +30,13 @@ type Handler struct {
 	Clock   func() time.Time // injectable for deterministic scoring/lock windows (tests)
 	Weights *Weights         // nil ⇒ DefaultWeights (per-tenant weights are a follow-up)
 	LockTTL time.Duration    // 0 ⇒ store.DefaultLockTTL
+
+	// Sender is the mail transport for send-bearing actions (FR-M7-05 approve_send /
+	// edit_send). nil ⇒ send disabled (503, fail-closed) — e.g. replay or an unwired app.
+	Sender deliver.Sender
+	// Connector is the read-only reservation back-end for the booking panel (FR-M7-07).
+	// nil ⇒ booking data unavailable (degraded, context-only). Tenant id is the request scope.
+	Connector reservation.ReservationConnector
 }
 
 func (h Handler) now() time.Time {
@@ -70,6 +79,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveClaim(w, r, tenant)
 	case kind == "resolve" && r.Method == http.MethodPost:
 		h.serveResolve(w, r, tenant)
+	case kind == "review" && r.Method == http.MethodGet:
+		h.serveReview(w, r, tenant) // FR-M7-03/04/07/08/19
+	case kind == "act" && r.Method == http.MethodPost:
+		h.serveAct(w, r, tenant) // FR-M7-05
 	case kind == "search" && r.Method == http.MethodGet:
 		h.serveSearch(w, r, tenant) // FR-M7-13
 	case kind == "escalate" && r.Method == http.MethodPost:

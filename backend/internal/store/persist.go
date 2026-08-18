@@ -71,6 +71,8 @@ func GetMessagesByConversation(ctx context.Context, tx pgx.Tx, conversationID st
 }
 
 // GateEvaluation is the persisted, auditable send decision (immutable, INV-2).
+// ConfidenceBand is the agent-facing high/medium/low band the gate saw (FR-M7-19,
+// CAL-04); it is optional and empty for evaluations recorded before it was captured.
 type GateEvaluation struct {
 	ID             string
 	ConversationID string
@@ -78,6 +80,7 @@ type GateEvaluation struct {
 	Outcome        string
 	Route          string
 	Conditions     json.RawMessage // the full per-condition vector (G01–G15)
+	ConfidenceBand string
 }
 
 // InsertGateEvaluation appends a gate evaluation for the active tenant. It is
@@ -87,11 +90,11 @@ type GateEvaluation struct {
 func InsertGateEvaluation(ctx context.Context, tx pgx.Tx, g GateEvaluation) (string, error) {
 	var id string
 	err := tx.QueryRow(ctx, `
-		INSERT INTO gate_evaluations (tenant_id, conversation_id, draft_id, outcome, route, conditions)
-		VALUES (cur_tenant(), $1, $2, $3, $4, $5::jsonb)
+		INSERT INTO gate_evaluations (tenant_id, conversation_id, draft_id, outcome, route, conditions, confidence_band)
+		VALUES (cur_tenant(), $1, $2, $3, $4, $5::jsonb, $6)
 		ON CONFLICT (tenant_id, conversation_id, draft_id) DO NOTHING
 		RETURNING id`,
-		g.ConversationID, g.DraftID, g.Outcome, g.Route, string(g.Conditions),
+		g.ConversationID, g.DraftID, g.Outcome, g.Route, string(g.Conditions), nullIfEmpty(g.ConfidenceBand),
 	).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Already recorded for this case — return the existing id.
@@ -104,6 +107,28 @@ func InsertGateEvaluation(ctx context.Context, tx pgx.Tx, g GateEvaluation) (str
 		return "", fmt.Errorf("store: insert gate evaluation: %w", err)
 	}
 	return id, nil
+}
+
+// GetLatestGateEvaluation returns the most recent gate evaluation on a conversation
+// (FR-M7-19 autonomy indicator), and whether one exists. Tenant-scoped by RLS. The
+// per-condition vector and the confidence band come back so the console can show the
+// gate decision read-only; ok=false means the case never reached the gate.
+func GetLatestGateEvaluation(ctx context.Context, tx pgx.Tx, conversationID string) (GateEvaluation, bool, error) {
+	var g GateEvaluation
+	err := tx.QueryRow(ctx, `
+		SELECT id, conversation_id, coalesce(draft_id::text,''), outcome, route, conditions, coalesce(confidence_band,'')
+		FROM gate_evaluations
+		WHERE conversation_id = $1
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`, conversationID).
+		Scan(&g.ID, &g.ConversationID, &g.DraftID, &g.Outcome, &g.Route, &g.Conditions, &g.ConfidenceBand)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return GateEvaluation{}, false, nil
+	}
+	if err != nil {
+		return GateEvaluation{}, false, fmt.Errorf("store: get latest gate evaluation: %w", err)
+	}
+	return g, true, nil
 }
 
 // Attachment is a stored, scanned attachment with masked extracted text.
