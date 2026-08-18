@@ -121,6 +121,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rep, e := Knowledge(r.Context(), tx, win, now, gaps)
 			body = rep
 			return e
+		case "compliance":
+			// FR-M10-07: a read-only surface over the M13/M6 immutable logs. Incomplete
+			// sections name their missing source (never silently partial); a scopeless
+			// query FAILS inside Compliance (require_tenant), not a degrade.
+			rep, e := Compliance(r.Context(), tx, win, now)
+			body = rep
+			return e
 		default:
 			return errUnknownKind
 		}

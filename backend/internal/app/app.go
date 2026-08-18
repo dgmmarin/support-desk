@@ -69,7 +69,7 @@ func Start(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server
 			health.CheckerFunc{N: "nats", F: b.Health},
 		},
 	})
-	// M10 read plane (read-only, tenant-scoped): /analytics/{operational,automation,quality,roi}.
+	// M10 read plane (read-only, tenant-scoped): /analytics/{operational,automation,quality,roi,knowledge,compliance}.
 	mux.Handle("/analytics/", analytics.Handler{DB: appDB})
 	// M4 knowledge browser (tenant-scoped): /knowledge/{search,stale,retire}.
 	mux.Handle("/knowledge/", knowledgebrowser.Handler{DB: appDB})

@@ -91,7 +91,7 @@ Keep this table in sync when an issue is added or changes status. Newest ids at 
 | [0059](ISSUE-0059-m9-event-workspace.md) | Event workspace + official position + cluster answer (personalized bulk) + automation freeze | done | M9 | M | 0058, 0027, 0017 |
 | [0060](ISSUE-0060-m13-complaint-dsar.md) | Complaint workflow (register/deadline/owner/closure, never auto-answered) + DSAR tooling (export/erase) | done | M13 | M | 0013, 0044 |
 | [0061](ISSUE-0061-m13-retention.md) | Retention policy per tenant/data-class + automated deletion | done | M13 | M | 0007, 0037 |
-| [0062](ISSUE-0062-m10-compliance-reports.md) | Compliance reports view (complaint register, disclosure log, data-request log, autonomy-policy history) | todo | M10 | M | 0060, 0041, 0017, 0033 |
+| [0062](ISSUE-0062-m10-compliance-reports.md) | Compliance reports view (complaint register, disclosure log, data-request log, autonomy-policy history) | done | M10 | M | 0060, 0041, 0017, 0033 |
 | [0063](ISSUE-0063-m11-onboarding-sandbox.md) | Onboarding wizard orchestration + sandbox/test replay mode | todo | M11 | M | 0037, 0053 |
 | [0064](ISSUE-0064-m11-rbac-sso.md) | RBAC + SSO/SAML/OIDC | todo | M11 | M | 0037 |
 | [0065](ISSUE-0065-m11-usage-metering-health.md) | Usage metering (conversations/messages/auto-sends/tokens/storage) + tenant health/status API | todo | M11 | M | 0031, 0053 |
