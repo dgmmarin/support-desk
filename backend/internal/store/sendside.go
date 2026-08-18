@@ -39,6 +39,7 @@ type SentMessage struct {
 	Content        string
 	Sender         string // "system" | agent id
 	DisclosureText string
+	AIGenerated    bool // machine-readable AI marking on the message (FR-M13-02, Art.50)
 	DeliveryStatus string
 }
 
@@ -54,10 +55,10 @@ func InsertSentMessage(ctx context.Context, tx pgx.Tx, s SentMessage) (string, e
 	}
 	var id string
 	err := tx.QueryRow(ctx, `
-		INSERT INTO sent_messages (tenant_id, conversation_id, draft_id, content, sender, disclosure_text, delivery_status)
-		VALUES (cur_tenant(), $1, $2, $3, $4, $5, $6)
+		INSERT INTO sent_messages (tenant_id, conversation_id, draft_id, content, sender, disclosure_text, ai_generated, delivery_status)
+		VALUES (cur_tenant(), $1, $2, $3, $4, $5, $6, $7)
 		RETURNING id`,
-		s.ConversationID, draftID, s.Content, s.Sender, s.DisclosureText, status,
+		s.ConversationID, draftID, s.Content, s.Sender, s.DisclosureText, s.AIGenerated, status,
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("store: insert sent message: %w", err)
@@ -76,11 +77,11 @@ func InsertSentMessageOnce(ctx context.Context, tx pgx.Tx, s SentMessage) (id st
 		status = "sent"
 	}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO sent_messages (tenant_id, conversation_id, draft_id, content, sender, disclosure_text, delivery_status)
-		VALUES (cur_tenant(), $1, $2, $3, $4, $5, $6)
+		INSERT INTO sent_messages (tenant_id, conversation_id, draft_id, content, sender, disclosure_text, ai_generated, delivery_status)
+		VALUES (cur_tenant(), $1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (tenant_id, conversation_id, draft_id) DO NOTHING
 		RETURNING id`,
-		s.ConversationID, s.DraftID, s.Content, s.Sender, s.DisclosureText, status,
+		s.ConversationID, s.DraftID, s.Content, s.Sender, s.DisclosureText, s.AIGenerated, status,
 	).Scan(&id)
 	if err == nil {
 		return id, true, nil
@@ -104,9 +105,9 @@ func GetSentMessageByDraft(ctx context.Context, tx pgx.Tx, draftID string) (Sent
 	var dID *string
 	err := tx.QueryRow(ctx, `
 		SELECT id, conversation_id, coalesce(draft_id::text,''), content, sender,
-		       coalesce(disclosure_text,''), delivery_status
+		       coalesce(disclosure_text,''), ai_generated, delivery_status
 		FROM sent_messages WHERE draft_id = $1 LIMIT 1`, draftID).
-		Scan(&s.ID, &s.ConversationID, &dID, &s.Content, &s.Sender, &s.DisclosureText, &s.DeliveryStatus)
+		Scan(&s.ID, &s.ConversationID, &dID, &s.Content, &s.Sender, &s.DisclosureText, &s.AIGenerated, &s.DeliveryStatus)
 	if err == pgx.ErrNoRows {
 		return SentMessage{}, false, nil
 	}

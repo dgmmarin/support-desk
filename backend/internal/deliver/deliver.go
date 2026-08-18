@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nats-io/nats.go/jetstream"
@@ -47,11 +48,35 @@ func New(sender Sender, db *store.DB) (*Deliver, error) {
 	return &Deliver{sender: sender, db: db, limits: store.DefaultRateLimits()}, nil
 }
 
-// Input is an auto-send case ready to dispatch.
+// Input is an auto-send case ready to dispatch. When AIGenerated is set (an
+// autonomous send from the gate), the message carries the tenant disclosure and the
+// pinned model+version that produced it (M13, ADR-0024): both are recorded per
+// message (FR-M13-01/02) and their absence blocks the send (fail-closed).
 type Input struct {
 	Recipient      string `json:"recipient"`
 	Content        string `json:"content"`
 	DisclosureText string `json:"disclosure_text,omitempty"`
+	AIGenerated    bool   `json:"ai_generated,omitempty"`   // machine-readable AI marking (FR-M13-02)
+	Model          string `json:"model,omitempty"`          // pinned model id (MOD-06)
+	ModelVersion   string `json:"model_version,omitempty"`  // pinned model version
+	PromptVersion  string `json:"prompt_version,omitempty"` // pinned prompt version (LEG-09)
+}
+
+// aiSendable is the deterministic send-side transparency gate (M13, ADR-0024): an
+// AI-generated auto-send may leave only with a disclosure line (FR-M13-01) and a
+// pinned model+version for the per-message log (FR-M13-02). A human-owned message
+// (AIGenerated=false) is not gated here — its provenance is the agent (LEG-08).
+func aiSendable(in Input) (ok bool, reason string) {
+	if !in.AIGenerated {
+		return true, ""
+	}
+	if strings.TrimSpace(in.DisclosureText) == "" {
+		return false, "AI-generated message without disclosure (FR-M13-01)"
+	}
+	if strings.TrimSpace(in.Model) == "" || strings.TrimSpace(in.ModelVersion) == "" {
+		return false, "AI-generated message without model/version record (FR-M13-02)"
+	}
+	return true, ""
 }
 
 // Serve runs the Deliver stage: for each auto-send case it persists the
@@ -70,6 +95,14 @@ func (d *Deliver) Serve(ctx context.Context, js jetstream.JetStream, logger *slo
 			return pipeline.Decision{}, err
 		}
 
+		// Fail-closed transparency gate (FR-M13-01/02): an AI-generated send without
+		// its disclosure or model/version is never sent unmarked — route it to a human
+		// instead of Nak-looping. The data-layer mark (below) is the hard backstop.
+		if ok, reason := aiSendable(in); !ok {
+			logger.Warn("deliver: AI send blocked, routing to review", "reason", reason, "correlation_id", env.CorrelationID)
+			return pipeline.Decision{Subject: reviewSubject, Payload: in}, nil
+		}
+
 		var sentID string
 		err := store.WithTenant(ctx, d.db.Pool, env.TenantID, func(tx pgx.Tx) error {
 			id, created, e := store.InsertSentMessageOnce(ctx, tx, store.SentMessage{
@@ -78,6 +111,7 @@ func (d *Deliver) Serve(ctx context.Context, js jetstream.JetStream, logger *slo
 				Content:        in.Content,
 				Sender:         "system",
 				DisclosureText: in.DisclosureText,
+				AIGenerated:    in.AIGenerated,
 				DeliveryStatus: "sent",
 			})
 			if e != nil {
@@ -91,6 +125,18 @@ func (d *Deliver) Serve(ctx context.Context, js jetstream.JetStream, logger *slo
 			if e := store.RecordAutoSend(ctx, tx, in.Recipient); e != nil {
 				return e
 			}
+			// Write the immutable per-message transparency record in the same tx as
+			// the send (FR-M13-01/02): if it can't be recorded, the send rolls back —
+			// no unlogged/unmarked AI send is possible.
+			if in.AIGenerated {
+				if _, e := store.InsertAIMessageMark(ctx, tx, store.AIMessageMark{
+					SentMessageID: id, AIGenerated: true, DisclosureMode: store.DisclosureModeAIGenerated,
+					DisclosureText: in.DisclosureText, Model: in.Model, ModelVersion: in.ModelVersion,
+					PromptVersion: in.PromptVersion,
+				}); e != nil {
+					return e
+				}
+			}
 			// Send within the tx: a send error rolls back the record so a retry
 			// re-sends (never marks sent on failure). The unique key makes the
 			// common redelivery exactly-once.
@@ -99,7 +145,8 @@ func (d *Deliver) Serve(ctx context.Context, js jetstream.JetStream, logger *slo
 			// is a transactional outbox (record→commit, separate idempotent sender).
 			return d.sender.Send(ctx, in.Recipient, store.SentMessage{
 				ID: id, ConversationID: env.ConversationID, DraftID: env.DraftID,
-				Content: in.Content, DisclosureText: in.DisclosureText, Sender: "system", DeliveryStatus: "sent",
+				Content: in.Content, DisclosureText: in.DisclosureText, AIGenerated: in.AIGenerated,
+				Sender: "system", DeliveryStatus: "sent",
 			})
 		})
 		if err != nil {

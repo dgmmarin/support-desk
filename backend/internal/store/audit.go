@@ -56,10 +56,10 @@ func ReconstructChain(ctx context.Context, tx pgx.Tx, sentMessageID string) (Cha
 	var draftID string
 	err := tx.QueryRow(ctx, `
 		SELECT id, conversation_id, coalesce(draft_id::text,''), content, sender,
-		       coalesce(disclosure_text,''), delivery_status
+		       coalesce(disclosure_text,''), ai_generated, delivery_status
 		FROM sent_messages WHERE id = $1`, sentMessageID).
 		Scan(&c.Sent.ID, &c.Sent.ConversationID, &draftID, &c.Sent.Content, &c.Sent.Sender,
-			&c.Sent.DisclosureText, &c.Sent.DeliveryStatus)
+			&c.Sent.DisclosureText, &c.Sent.AIGenerated, &c.Sent.DeliveryStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Chain{}, fmt.Errorf("store: sent message %q not found in this tenant scope", sentMessageID)
 	}
