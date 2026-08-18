@@ -29,6 +29,7 @@ const (
 	SectionCost       = "cost"
 	SectionRetention  = "retention"
 	SectionMailboxes  = "mailboxes"
+	SectionSLA        = "sla"
 )
 
 // configChangeKind is the change_log kind under which every tenant-config change is
@@ -300,6 +301,36 @@ func GetMailboxes(ctx context.Context, tx pgx.Tx) (Mailboxes, bool, error) {
 // SetMailboxes upserts the active tenant's mailbox/identity config.
 func SetMailboxes(ctx context.Context, tx pgx.Tx, actor string, m Mailboxes) (int, error) {
 	return setTyped(ctx, tx, SectionMailboxes, actor, m)
+}
+
+// SLARule is one per-intent/per-channel response-time target (FR-M7-12). An empty Intent
+// or Channel matches any value on that dimension; the most specific matching rule wins. The
+// target is a response deadline in minutes from a case's enqueue time.
+type SLARule struct {
+	Intent          string `json:"intent,omitempty"`  // "" = any intent
+	Channel         string `json:"channel,omitempty"` // "" = any channel
+	ResponseMinutes int    `json:"response_minutes"`
+}
+
+// SLAConfig is the tenant's SLA policy (FR-M7-12, read by the M7 queue, ISSUE-0055). Rules
+// resolve per (intent, channel); DefaultResponseMinutes applies when no rule matches. The
+// fail-closed default (unset section) is all-zero / no rules: an UNDEFINED SLA means NO timer
+// and NEVER a breach (M7 §2 FR-M7-12) — the platform never fabricates a deadline.
+type SLAConfig struct {
+	DefaultResponseMinutes int       `json:"default_response_minutes"` // 0 = no default SLA
+	Rules                  []SLARule `json:"rules"`
+}
+
+// GetSLAConfig returns the tenant's SLA policy, or the empty (no-timer) default when unset.
+func GetSLAConfig(ctx context.Context, tx pgx.Tx) (SLAConfig, bool, error) {
+	var s SLAConfig
+	found, err := getTyped(ctx, tx, SectionSLA, &s)
+	return s, found, err
+}
+
+// SetSLAConfig upserts the tenant's SLA policy.
+func SetSLAConfig(ctx context.Context, tx pgx.Tx, actor string, s SLAConfig) (int, error) {
+	return setTyped(ctx, tx, SectionSLA, actor, s)
 }
 
 // TenantConfig is the aggregate typed view — a single read of every section, each at its
